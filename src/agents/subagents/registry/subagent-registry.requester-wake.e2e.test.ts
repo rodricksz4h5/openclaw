@@ -35,6 +35,7 @@ import type {
   GatewayRequest,
   SessionStoreEntry,
 } from "./subagent-registry.lifecycle-fixture.test-support.js";
+import { flushLifecycleTaskWrites } from "./subagent-registry.lifecycle-waits.test-support.js";
 import { registerRequesterWakeSettlementBoundaryTests } from "./subagent-registry.requester-wake-settlement.test-support.js";
 import * as registry from "./subagent-registry.test-helpers.js";
 
@@ -313,7 +314,7 @@ describe("requester settle wake product flow", () => {
         return;
       }
       await vi.advanceTimersByTimeAsync(100);
-      await vi.dynamicImportSettled();
+      await flushLifecycleTaskWrites();
     }
     throw new Error(`expected ${expectedCount} agent calls, got ${getAgentCalls().length}`);
   };
@@ -332,7 +333,7 @@ describe("requester settle wake product flow", () => {
         return;
       }
       await vi.advanceTimersByTimeAsync(1);
-      await vi.dynamicImportSettled();
+      await flushLifecycleTaskWrites();
     }
     const run = registry.getSubagentRunByRunId(runId);
     throw new Error(
@@ -907,18 +908,26 @@ describe("requester settle wake product flow", () => {
             await yieldTurn(initialRequesterTurnRunId, [alpha]);
             attachment?.releaseProvisional();
             emitCompleted(alpha.runId, alpha.childSessionKey, "alpha findings");
-            await vi.waitFor(() => {
-              expect(firstWakeReturned).toBe(true);
-              if (!acceptNextChild) {
-                expect(
-                  registry.getSubagentRunByRunId(alpha.runId)?.requesterSettleWake,
-                ).toMatchObject({
-                  status: "pending",
-                  attemptCount: 1,
-                  nextAttemptAt: expect.any(Number),
-                });
+            await flushLifecycleTaskWrites();
+            await vi.waitFor(() => expect(firstWakeReturned).toBe(true));
+            if (!acceptNextChild) {
+              const wake = vi.mocked(maybeWakeRequesterAfterAllChildrenSettled);
+              const entry = registry.getSubagentRunByRunId(alpha.runId);
+              const attemptIndex = wake.mock.calls.findLastIndex(
+                ([params]) => params.settledEntry === entry,
+              );
+              const attempt = wake.mock.results[attemptIndex];
+              if (!attempt || attempt.type !== "return") {
+                throw new Error("Missing requester wake attempt for the current alpha run");
               }
-            });
+              // The worker receipt read settles after the Gateway response.
+              await attempt.value;
+              expect(entry?.requesterSettleWake).toMatchObject({
+                status: "pending",
+                attemptCount: 1,
+                nextAttemptAt: expect.any(Number),
+              });
+            }
             await vi.advanceTimersByTimeAsync(0);
             expect(getRequesterWakeCalls()).toHaveLength(1);
             expect(visibleFinals).toBe(0);
