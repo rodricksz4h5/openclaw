@@ -36,6 +36,7 @@ import type {
   SessionStoreEntry,
 } from "./subagent-registry.lifecycle-fixture.test-support.js";
 import { flushLifecycleTaskWrites } from "./subagent-registry.lifecycle-waits.test-support.js";
+import { settleSubagentRegistryPersistenceWork } from "./subagent-registry.persistence.test-support.js";
 import { registerRequesterWakeSettlementBoundaryTests } from "./subagent-registry.requester-wake-settlement.test-support.js";
 import * as registry from "./subagent-registry.test-helpers.js";
 
@@ -283,6 +284,7 @@ describe("requester settle wake product flow", () => {
     releaseAgentCallGate?.();
     releaseAgentCallGate = undefined;
     await vi.advanceTimersByTimeAsync(0);
+    await settleSubagentRegistryPersistenceWork();
     lifecycleHandler = undefined;
     subagentAnnounceDeliveryTesting.setDepsForTest();
     subagentAnnounceOutputTesting.setDepsForTest();
