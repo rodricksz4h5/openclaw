@@ -26,6 +26,7 @@ import {
   resolveInternalSessionKey,
   resolveMainSessionAlias,
 } from "./subagent-spawn.runtime.js";
+import type { SpawnSubagentMode } from "./subagent-spawn.types.js";
 import { normalizeSubagentTaskName } from "./subagent-task-name.js";
 
 function rejectSubagentSpawnRequest(status: "error" | "forbidden", error: string) {
@@ -53,8 +54,8 @@ export function resolveSubagentSpawnRequest(
       `Invalid agentId "${requestedAgentId}". Agent IDs must match [a-z0-9][a-z0-9_-]{0,63}.`,
     );
   }
-  // Agent-started subagents never own a chat, so every spawn is a one-shot run.
-  const spawnMode = "run" as const;
+  // Agent-started subagents never own a chat; only a user command asks for a child thread.
+  const spawnMode: SpawnSubagentMode = params.childThread ? "session" : "run";
   if (
     params.completionTarget === "parent" &&
     (params.collect || params.expectsCompletionMessage === false)
@@ -64,7 +65,8 @@ export function resolveSubagentSpawnRequest(
       'sessions_spawn completionTarget="parent" requires collect=false and completion notifications enabled.',
     );
   }
-  const cleanup: "delete" | "keep" = params.cleanup === "delete" ? "delete" : "keep";
+  const cleanup: "delete" | "keep" =
+    spawnMode === "run" && params.cleanup === "delete" ? "delete" : "keep";
   const expectsCompletionMessage = params.collect
     ? false
     : params.expectsCompletionMessage !== false;

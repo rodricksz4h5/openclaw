@@ -67,13 +67,18 @@ read_when:
   </Accordion>
 
   <Accordion title="How do thread-bound subagent sessions work on Discord?">
-    Agent-started subagents never bind a thread or take over a chat. They run in the background and their result returns to the agent that started them. For native subagents, only user commands, such as `/acp spawn --bind here` or `--thread auto`, bind a conversation to another session. ACP spawns with `thread: true` keep their own binding behavior.
+    Agent-started spawns never bind a thread or take over a chat, for native subagents and ACP alike. They run in the background and their result returns to the agent that started them. Only user commands bind a thread:
+
+    - `/subagents spawn --thread [--agent <id>] <task>` creates a new Discord thread and binds a persistent subagent session there. Follow-ups in that thread go to the subagent. The channel where you ran the command does not change. In a DM, it stops and starts nothing.
+    - `/acp spawn <harness> --thread auto` or `--bind here` binds an ACP session.
+
+    On upgrade, OpenClaw removes old bindings that agent spawns put on your own chat. Bindings you made stay.
 
     - `/agents` inspects binding state.
     - `/session idle <duration|off>` and `/session max-age <duration|off>` control automatic expiry.
     - `/session unbind` detaches the thread without closing the agent session.
 
-    Config: `session.threadBindings.enabled` (global switch), `session.threadBindings.idleHours` (default `24`, `0` disables), `session.threadBindings.maxAgeHours` (default `0` = no hard cap), and `session.threadBindings.spawnSessions` for ACP thread spawns (default `true`).
+    Config: `session.threadBindings.enabled` (global switch), `session.threadBindings.idleHours` (default `24`, `0` disables), `session.threadBindings.maxAgeHours` (default `0` = no hard cap), and `session.threadBindings.spawnSessions` for `/subagents spawn --thread` and `/acp spawn --thread` (default `true`).
 
     Docs: [Sub-agents](/tools/subagents), [Discord](/channels/discord), [Configuration Reference](/gateway/configuration-reference), [Slash commands](/tools/slash-commands).
 

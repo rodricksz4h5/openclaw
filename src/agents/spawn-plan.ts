@@ -4,20 +4,10 @@ import {
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
 import {
-  resolveChannelDefaultBindingPlacement,
-  resolveInboundConversationResolution,
-} from "../channels/conversation-resolution.js";
-import {
-  formatThreadBindingDisabledError,
-  formatThreadBindingSpawnDisabledError,
-  resolveThreadBindingSpawnPolicy,
-} from "../channels/thread-bindings-policy.js";
-import {
   DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT,
   DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH,
 } from "../config/agent-limits.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { getSessionBindingService } from "../infra/outbound/session-binding-service.js";
 import { resolveAgentConfig } from "./agent-scope.js";
 import { resolveChildAdmission, type ChildAdmissionCap } from "./child-admission.js";
 import { countActiveRunsForSession } from "./subagents/registry/subagent-registry.js";
@@ -25,28 +15,7 @@ import { resolveSubagentCapabilities } from "./subagents/spawn/subagent-capabili
 import { getSubagentDepthFromSessionStore } from "./subagents/spawn/subagent-depth.js";
 import { resolveSubagentTargetPolicy } from "./subagents/spawn/subagent-target-policy.js";
 
-type SpawnMode = "run" | "session";
 type SpawnBackendKind = "subagent" | "acp";
-
-export type PreparedSpawnThreadBinding = {
-  channel: string;
-  accountId: string;
-  placement: "current" | "child";
-  conversationId: string;
-  parentConversationId?: string;
-};
-
-type SessionBindingService = ReturnType<typeof getSessionBindingService>;
-
-export function resolveSpawnMode(params: {
-  requestedMode?: SpawnMode;
-  threadRequested: boolean;
-}): SpawnMode {
-  if (params.requestedMode === "run" || params.requestedMode === "session") {
-    return params.requestedMode;
-  }
-  return params.threadRequested ? "session" : "run";
-}
 
 export function mintSpawnSessionKey(params: {
   targetAgentId: string;
@@ -71,81 +40,6 @@ export function resolveSpawnChannelAccountId(params: {
   }
   const channels = params.cfg.channels as Record<string, { defaultAccount?: unknown } | undefined>;
   return normalizeOptionalString(channels?.[channel]?.defaultAccount) ?? "default";
-}
-
-/** Prepares the conversation binding for an ACP spawn that requested thread=true. */
-export function prepareSpawnThreadBinding(params: {
-  cfg: OpenClawConfig;
-  bindingService: SessionBindingService;
-  channel?: string;
-  accountId?: string;
-  to?: string;
-  threadId?: string | number;
-  groupId?: string;
-}): { ok: true; binding: PreparedSpawnThreadBinding } | { ok: false; error: string } {
-  const channel = normalizeOptionalLowercaseString(params.channel);
-  if (!channel) {
-    return { ok: false, error: "thread=true for ACP sessions requires a channel context." };
-  }
-  const accountId = resolveSpawnChannelAccountId({
-    cfg: params.cfg,
-    channel,
-    accountId: params.accountId,
-  });
-  const policy = resolveThreadBindingSpawnPolicy({
-    cfg: params.cfg,
-    channel,
-    accountId,
-    kind: "acp",
-  });
-  if (!policy.enabled) {
-    return { ok: false, error: formatThreadBindingDisabledError({ ...policy, kind: "acp" }) };
-  }
-  if (!policy.spawnEnabled) {
-    return { ok: false, error: formatThreadBindingSpawnDisabledError({ ...policy, kind: "acp" }) };
-  }
-  const capabilities = params.bindingService.getCapabilities({
-    channel: policy.channel,
-    accountId: policy.accountId,
-  });
-  if (!capabilities.adapterAvailable) {
-    return { ok: false, error: `Thread bindings are unavailable for ${policy.channel}.` };
-  }
-  const placement =
-    resolveChannelDefaultBindingPlacement(policy.channel) ??
-    (capabilities.placements.includes("child") ? "child" : "current");
-  if (!capabilities.bindSupported || !capabilities.placements.includes(placement)) {
-    return {
-      ok: false,
-      error: `Thread bindings do not support ${placement} placement for ${policy.channel}.`,
-    };
-  }
-  const conversation = resolveInboundConversationResolution({
-    cfg: params.cfg,
-    channel: policy.channel,
-    accountId: policy.accountId,
-    to: params.to,
-    threadId: params.threadId,
-    groupId: params.groupId,
-  });
-  if (!conversation?.conversationId) {
-    return {
-      ok: false,
-      error: `Could not resolve a ${policy.channel} conversation for acp thread spawn.`,
-    };
-  }
-  return {
-    ok: true,
-    binding: {
-      channel: policy.channel,
-      accountId: policy.accountId,
-      placement,
-      conversationId: conversation.conversationId,
-      ...(conversation.parentConversationId
-        ? { parentConversationId: conversation.parentConversationId }
-        : {}),
-    },
-  };
 }
 
 export function resolveSpawnAdmission(params: {

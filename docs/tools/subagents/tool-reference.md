@@ -13,10 +13,10 @@ Native sub-agents start isolated unless the caller explicitly asks to fork the
 current transcript. Pass `context: "isolated"` explicitly when the child must
 start with clean context.
 
-| Mode       | When to use it                                                                                                                         | Behavior                                                                                |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `isolated` | Fresh research, independent implementation, slow tool work, or anything that can be briefed in the task text                           | Creates a clean child transcript. Default for non-thread spawns; keeps token use lower. |
-| `fork`     | Work that depends on the current conversation, prior tool results, or nuanced instructions already present in the requester transcript | Branches the requester transcript into the child session before the child starts.       |
+| Mode       | When to use it                                                                                                                         | Behavior                                                                          |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `isolated` | Fresh research, independent implementation, slow tool work, or anything that can be briefed in the task text                           | Creates a clean child transcript. Default for all spawns; keeps token use lower.  |
+| `fork`     | Work that depends on the current conversation, prior tool results, or nuanced instructions already present in the requester transcript | Branches the requester transcript into the child session before the child starts. |
 
 Use `fork` sparingly. It is for context-sensitive delegation, not a
 replacement for writing a clear task prompt.
@@ -26,7 +26,7 @@ replacement for writing a clear task prompt.
 Starts a sub-agent run on the spawning session's sub-agent queue, with
 [per-session concurrency](/tools/subagents/operations#concurrency). Ordinary one-shot runs
 use `deliver: false` and return through an announce step; collectors, quiet
-runs, and direct thread replies use the
+runs, and user-started thread sessions use the
 [completion paths](/tools/subagents/slash-command#spawn-behavior).
 
 Availability depends on the caller's effective tool policy. The built-in
@@ -181,11 +181,11 @@ In either mode, internal QA, research, coding, review, and test lanes use ordina
   Override thinking level for the sub-agent run. Not available with `visible: true`.
 </ParamField>
 <ParamField path="thread" type="boolean" default="false">
-  ACP only. Native sub-agents never bind a chat thread or conversation. A sub-agent request with `thread: true` still succeeds: the child runs unbound in the background, its result returns to the requester, and the result `note` says that thread binding is not available.
+  Not offered. Agent-started spawns never bind a chat thread or conversation, for native sub-agents and ACP alike. An older call with `thread: true` still succeeds: the child runs as a one-shot background run, its result returns to the requester, and the result `note` says that thread binding is not available for agent-started spawns. To start a sub-agent in a new thread, the user runs `/subagents spawn --thread <task>`.
 </ParamField>
-<ParamField path="mode" type='"run" | "session"' default="run">
-  Native sub-agents always run as `"run"`. A sub-agent request with `mode: "session"` runs as a one-shot unbound run and says so in the result `note`. `mode: "session"` applies to ACP with `thread: true`.
-  With `visible: true`, omit `mode` or use the default `"run"`; the visible session remains persistent. `mode: "session"` is unavailable on this path.
+<ParamField path="mode" type='"run"' default="run">
+  Only `"run"` (one-shot). An older call with `mode: "session"` (also with `runtime: "acp"`) runs as a one-shot background run and says so in the result `note`. Agent-started ACP spawns are always one-shot.
+  With `visible: true`, omit `mode` or use the default `"run"`; the visible session remains persistent.
 </ParamField>
 <ParamField path="cleanup" type='"delete" | "keep"' default="keep">
   `"delete"` archives the session immediately after announce. The Control UI's **Tasks** inspector can preview the retained transcript under the [post-cleanup access rules](/tools/subagents/announce#announce).

@@ -46,6 +46,8 @@ How forum topics map to sessions, agents, and ACP bindings.
 
     **Thread-bound ACP spawn from chat**: `/acp spawn <agent> --thread here|auto` binds the current topic to a new ACP session; follow-ups route there directly, and OpenClaw pins the spawn confirmation in-topic. Controlled by `session.threadBindings.spawnSessions` (default: `true`).
 
+    **Subagent in a new topic**: in a forum group, `/subagents spawn --thread [--agent <id>] <task>` creates a new topic and binds a persistent subagent session there. Follow-ups in that topic go to the subagent; the topic where you ran the command does not change. In a DM or a group that is not a forum, the command stops and starts nothing. Also controlled by `session.threadBindings.spawnSessions`. Agent-started spawns never bind a topic.
+
     Disabling `threadBindings.enabled` globally, for Telegram, or for one account leaves ordinary Telegram messages working.
 
     Template context exposes `MessageThreadId` and `IsForum`. DM chats with `message_thread_id` keep reply metadata but only use thread-aware session keys when Telegram `getMe` reports `has_topics_enabled: true`.

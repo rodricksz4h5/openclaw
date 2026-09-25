@@ -9,13 +9,24 @@ read_when:
 
 ## Slash command
 
-`/subagents` inspects sub-agent runs for the **current session**:
+`/subagents` inspects sub-agent runs for the **current session**, and starts a
+sub-agent in a new thread:
 
 ```text
 /subagents list
 /subagents log <id|#> [limit] [tools]
 /subagents info <id|#>
+/subagents spawn --thread [--agent <id>] <task>
 ```
+
+`/subagents spawn --thread` creates a new thread or topic and binds a
+persistent sub-agent session there. The sub-agent answers in the new thread,
+and your follow-ups there go to it. The conversation where you ran the command
+does not change. `--thread` is required. `--agent <id>` picks another agent
+that `subagents.allowAgents` allows. It works in Discord channels, Matrix
+rooms, and Telegram forum groups. In a DM or a group that cannot hold threads,
+it stops with a message and starts nothing. See
+[Thread-bound sessions](/tools/subagents/thread-bound-sessions#thread-bound-sessions).
 
 `/subagents info` shows run metadata (status, timestamps, session id,
 transcript path, cleanup). `/subagents log` prints recent chat turns for a
@@ -50,7 +61,8 @@ successful run clears the previous failure reason.
 
 ### Thread binding controls
 
-These commands work on channels with persistent thread bindings. See
+These commands work on channels with persistent thread bindings, such as a
+thread from `/subagents spawn --thread`. See
 [Thread supporting channels](/tools/subagents/thread-bound-sessions#thread-supporting-channels).
 
 ```text
@@ -62,16 +74,17 @@ These commands work on channels with persistent thread bindings. See
 
 ### Spawn behavior
 
-Agents start background sub-agents with the `sessions_spawn` tool. Follow the
-completion path described in the accepted receipt:
+Agents start background sub-agents with the `sessions_spawn` tool. These
+spawns never bind a thread or conversation. Follow the completion path
+described in the accepted receipt:
 
 - Ordinary announcing runs return an internal completion event to the requester,
   which reviews the result and decides whether a user-facing update is needed.
 - [Swarm collectors](/tools/swarm) return results through explicit collection,
   not completion notifications; reserve them for large parallel fan-out (several
   similar children, about five or more), and use ordinary spawns for one or a few.
-- Thread-bound session runs with a deliverable bound route reply directly to that
-  thread, without a separate parent announcement.
+- Thread-bound sessions from `/subagents spawn --thread` reply directly in their
+  new thread, without a separate parent announcement.
 - Caller-managed quiet runs send no completion notification.
 
 When [execution identity auditing](/gateway/audit#run-identity-inspection) is

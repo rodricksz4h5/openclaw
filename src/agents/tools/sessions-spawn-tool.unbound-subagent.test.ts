@@ -147,7 +147,7 @@ describe("sessions_spawn subagent thread requests", () => {
     const details = result.details as Record<string, unknown>;
     expect(details.status).toBe("accepted");
     expect(details.mode).toBe("run");
-    expect(details.note).toMatch(/Thread binding is not available for agent-started subagents/);
+    expect(details.note).toMatch(/Thread binding is not available for agent-started spawns/);
     expect(hoisted.bind).not.toHaveBeenCalled();
 
     const agentCall = hoisted.callGatewayMock.mock.calls

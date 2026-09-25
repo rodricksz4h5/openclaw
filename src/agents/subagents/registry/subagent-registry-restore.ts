@@ -159,6 +159,10 @@ export function createSubagentRegistryRestorer(config: {
       return;
     }
     const cfg = getRuntimeConfig();
+    // Older agent spawns could bind the requester's own chat; retire those takeovers.
+    void import("./subagent-takeover-bindings.js").then(({ startAgentSpawnTakeoverSweep }) =>
+      startAgentSpawnTakeoverSweep({ runs, warn }),
+    );
     const requesterTurns = new Map<string, Map<string, SubagentRunRecord[]>>();
     const resolveRequesterAgentId = (entry: SubagentRunRecord) =>
       resolveSubagentRequesterAgentId(cfg, entry);

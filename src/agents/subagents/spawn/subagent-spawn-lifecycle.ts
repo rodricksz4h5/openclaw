@@ -17,6 +17,7 @@ export function createSubagentSpawnLifecycleEmitter(params: {
   targetAgentId: string;
   label?: string;
   requesterOrigin?: DeliveryContext;
+  requestThreadBinding: boolean;
   spawnMode: SpawnSubagentMode;
   resolvedModelMetadata: {
     resolvedModel?: string;
@@ -59,8 +60,7 @@ export function createSubagentSpawnLifecycleEmitter(params: {
               to: params.requesterOrigin?.to,
               threadId: params.requesterOrigin?.threadId,
             },
-            // Agent-started subagents never bind a chat.
-            threadRequested: false,
+            threadRequested: params.requestThreadBinding,
             mode: params.spawnMode,
             ...params.resolvedModelMetadata,
           },
