@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import chokidar from "chokidar";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, onTestFailed, vi } from "vitest";
 import { resolveDefaultAgentDir } from "../../../src/agents/agent-scope.js";
 import { prepareHostConfigSnapshot } from "../../../src/config/io.snapshot-preparation.js";
 import { GatewayClient, GatewayClientRequestError } from "../../../src/gateway/client.js";
@@ -24,6 +24,7 @@ const GATEWAY_TOKEN = "config-rpc-synthetic-token";
 let state: Awaited<ReturnType<typeof createOpenClawTestState>>;
 let server: Awaited<ReturnType<typeof startGatewayServer>> | undefined;
 let client: GatewayClient | undefined;
+let configRpcLifecyclePhase = "idle";
 const hotReloadRecovery = vi.fn(() => ({ status: "emitted" as const }));
 const unarmedConfigWatchers: ReturnType<typeof chokidar.watch>[] = [];
 
@@ -74,6 +75,7 @@ async function startConfigRpcGateway({
   configRelativePath,
   watchConfigFiles = true,
 }: ConfigRpcGatewayOptions = {}) {
+  configRpcLifecyclePhase = "isolated-state";
   state = await createOpenClawTestState({
     label: "config-rpc",
     env: {
@@ -115,6 +117,7 @@ async function startConfigRpcGateway({
   }
   hotReloadRecovery.mockClear();
   const port = await getFreePort();
+  configRpcLifecyclePhase = "gateway-start";
   server = await startGatewayServer(port, {
     auth: { mode: "token", token: GATEWAY_TOKEN },
     prepareConfigSnapshot: prepareHostConfigSnapshot,
@@ -141,8 +144,11 @@ async function startConfigRpcGateway({
     onClose: (code, reason) => connected.reject(new Error(`closed ${code}: ${reason}`)),
   });
   client.start();
+  configRpcLifecyclePhase = "client-connect";
   await withTestTimeout(connected.promise, 10_000, "gateway connect timeout");
+  configRpcLifecyclePhase = "startup-settlement";
   await server.startupSettled;
+  configRpcLifecyclePhase = "idle";
 }
 
 async function stopConfigRpcGateway() {
@@ -151,21 +157,30 @@ async function stopConfigRpcGateway() {
   await runQaGatewayFixture(
     async () => resetGatewayRestartStateForInProcessRestart(),
     async () => {
+      configRpcLifecyclePhase = "client-stop";
       await client?.stopAndWait();
       client = undefined;
     },
     async () => {
+      configRpcLifecyclePhase = "gateway-close";
       await server?.close();
       server = undefined;
     },
-    () => Promise.all(unarmedConfigWatchers.splice(0).map((watcher) => watcher.close())),
+    () => {
+      configRpcLifecyclePhase = "watcher-close";
+      return Promise.all(unarmedConfigWatchers.splice(0).map((watcher) => watcher.close()));
+    },
     () => resetGatewayRestartStateForInProcessRestart(),
-    () => state?.cleanup(),
+    () => {
+      configRpcLifecyclePhase = "isolated-state-cleanup";
+      return state?.cleanup();
+    },
     () => resetLogger(),
     () => clearPluginMetadataLifecycleCaches(),
     () => vi.restoreAllMocks(),
     () => expect(hotReloadRecovery).not.toHaveBeenCalled(),
   );
+  configRpcLifecyclePhase = "idle";
 }
 
 export async function resetTempDir(name: string): Promise<string> {
@@ -254,7 +269,12 @@ export async function writeUnresolvedAuthProfileTokenRef(missingEnvVar: string) 
 }
 
 export function installConfigWriteGatewayHooks(options: ConfigRpcGatewayOptions = {}) {
-  beforeEach(() => startConfigRpcGateway(options));
+  beforeEach(() => {
+    onTestFailed(() => {
+      console.error(`[config-rpc] last lifecycle phase: ${configRpcLifecyclePhase}`);
+    });
+    return startConfigRpcGateway(options);
+  });
   beforeEach(() => {
     pruneStaleControlPlaneBuckets(Number.MAX_SAFE_INTEGER);
   });
