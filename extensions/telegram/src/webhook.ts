@@ -41,7 +41,10 @@ import {
   readJsonBodyWithLimit,
   sendHttpRequestRejection,
 } from "openclaw/plugin-sdk/webhook-request-guards";
-import { mergeTelegramAccountConfig } from "./account-config.js";
+import {
+  mergeTelegramAccountConfig,
+  resolveTelegramLegacyWebhookListener,
+} from "./account-config.js";
 import { resolveTelegramAllowedUpdates } from "./allowed-updates.js";
 import { withTelegramApiErrorLogging } from "./api-logging.js";
 import { createTelegramBot } from "./bot.js";
@@ -202,7 +205,7 @@ export async function startTelegramWebhook(opts: {
   ownerAgentId?: string;
   config?: OpenClawConfig;
   path?: string;
-  legacyWebhook?: { port: number; host?: string };
+  legacyWebhook?: false | { port: number; host?: string };
   secret?: string;
   runtime?: RuntimeEnv;
   buildContext?: Parameters<typeof createTelegramBot>[0]["buildContext"];
@@ -225,9 +228,7 @@ export async function startTelegramWebhook(opts: {
   }
   const { targets: webhookTargets, rateLimiter } = state;
   const readConfig = createRuntimeConfigReader(opts.config ?? {});
-  const legacyListener = opts.legacyWebhook
-    ? { ...opts.legacyWebhook, host: opts.legacyWebhook.host ?? "127.0.0.1" }
-    : undefined;
+  const legacyListener = resolveTelegramLegacyWebhookListener(opts.legacyWebhook);
   const path = opts.path ?? "/telegram-webhook";
   const pathname = URL.parse(path, "http://localhost")?.pathname ?? path;
   const probe = classifyGatewayProbePath(pathname);
@@ -237,7 +238,7 @@ export async function startTelegramWebhook(opts: {
       : isProtectedPluginRoutePathFromContext(resolvePluginRoutePathContext(pathname))
         ? "requires Gateway authentication"
         : undefined;
-  if (pathConflict && !opts.legacyWebhook) {
+  if (pathConflict && !legacyListener) {
     throw new Error(
       `Telegram webhook path "${path}" ${pathConflict}. Set webhookPath to /telegram-webhook and update webhookUrl or its reverse-proxy mapping before restarting.`,
     );
@@ -258,7 +259,7 @@ export async function startTelegramWebhook(opts: {
   const runtime = opts.runtime ?? defaultRuntime;
   if (pathConflict) {
     runtime.log?.(
-      `Telegram webhook path "${path}" ${pathConflict} on the Gateway port; its configured legacy listener remains available. Set webhookPath to /telegram-webhook and update webhookUrl or its reverse-proxy mapping before removing legacyWebhook.`,
+      `Telegram webhook path "${path}" ${pathConflict} on the Gateway port; its legacy listener remains available. Set webhookPath to /telegram-webhook and update webhookUrl or its reverse-proxy mapping before setting legacyWebhook: false.`,
     );
   }
   const status = createTelegramStatusPublisher("webhook", opts.setStatus);
@@ -569,15 +570,15 @@ export async function startTelegramWebhook(opts: {
     ).length > 1
   ) {
     runtime.error?.(
-      `Telegram accounts on Gateway route ${path} share a webhook secret. Their configured legacy ports retain account routing; give each account a distinct webhookSecret or webhookPath before moving traffic to the Gateway port.`,
+      `Telegram accounts on Gateway route ${path} share a webhook secret. Give each account a distinct webhookSecret or webhookPath. Separate legacy endpoints retain account routing while you update the Gateway routes.`,
     );
   }
   const gatewayPort = resolveGatewayPort(opts.config);
   runtime.log?.(`telegram webhook Gateway route ${path} (port ${gatewayPort})`);
   runtime.log?.(
-    opts.legacyWebhook
-      ? `Telegram legacy webhook port ${opts.legacyWebhook.port} forwards to the Gateway route. Point the reverse proxy for ${publicUrl} at Gateway port ${gatewayPort}${path}, verify delivery, then remove legacyWebhook. Compatibility removal is planned after a two-month migration window; it does not expire automatically.`
-      : `Telegram webhook URL ${publicUrl} must forward to Gateway port ${gatewayPort}${path}; the old default port 8787 is no longer opened.`,
+    legacyListener
+      ? `Telegram legacy webhook listener ${legacyListener.host}:${legacyListener.port} forwards to the Gateway route. Point the reverse proxy for ${publicUrl} at Gateway port ${gatewayPort}${path}, verify delivery, then set legacyWebhook: false to disable legacy forwarding for this account.`
+      : `Telegram legacy forwarding for this account is disabled by legacyWebhook: false. Route ${publicUrl} to Gateway port ${gatewayPort}${path}.`,
   );
 
   if (!shutDown) {

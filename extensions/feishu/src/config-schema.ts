@@ -239,6 +239,7 @@ const FeishuSharedConfigShape = {
   legacyWebhook: z
     .object({ port: z.number().int().min(1).max(65535), host: z.string().optional() })
     .strict()
+    .or(z.literal(false))
     .optional(),
   capabilities: z.array(z.string()).optional(),
   markdown: MarkdownConfigSchema,

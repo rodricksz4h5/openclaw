@@ -55,7 +55,7 @@ function createMSTeamsQaBotToken() {
   const encode = (value: Record<string, unknown>) =>
     Buffer.from(JSON.stringify(value)).toString("base64url");
   // Teams SDK decodes custom tokens before attaching them to Connector requests.
-  // This unsigned value is accepted only by the nonce-protected loopback server.
+  // The private QA Gateway and nonce-protected Connector require this per-run value.
   return [
     encode({ alg: "none", typ: "JWT" }),
     encode({ appid: APP_ID, jti: randomUUID(), tid: TENANT_ID }),
@@ -198,7 +198,7 @@ export async function createMSTeamsQaTransportAdapter(
         init: {
           method: "POST",
           headers: {
-            authorization: "Bearer private-qa",
+            authorization: `Bearer ${botToken}`,
             "content-type": "application/json",
           },
           body: JSON.stringify(activity),
@@ -245,6 +245,7 @@ export async function createMSTeamsQaTransportAdapter(
             requireMention: requireGroupMention,
             replyStyle: "thread",
             webhook: { path: "/api/messages" },
+            legacyWebhook: false,
           },
         },
       } satisfies Pick<OpenClawConfig, "channels" | "messages">;

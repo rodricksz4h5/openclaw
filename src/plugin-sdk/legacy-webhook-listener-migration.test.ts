@@ -4,6 +4,7 @@ import { createLegacyWebhookListenerDoctorContract } from "./legacy-webhook-list
 
 const contract = createLegacyWebhookListenerDoctorContract({
   channelKey: "telegram",
+  defaultPort: 8787,
   defaultHost: "127.0.0.1",
 });
 const config = (entry: Record<string, unknown>): OpenClawConfig => ({
@@ -46,14 +47,44 @@ describe("legacy webhook listener migration", () => {
     ).toBe(false);
   });
 
-  it("never creates a listener for an implicit default port", () => {
+  it("preserves an explicit bind host with the old default port and leaves implicit config unchanged", () => {
     const result = contract.normalizeCompatibilityConfig({
       cfg: config({ webhookHost: "0.0.0.0", accounts: { other: {} } }),
     });
-    expect(result.config).toEqual(config({ accounts: { other: {} } }));
-    expect(result.changes).toEqual([expect.stringContaining("no legacy listener will open")]);
+    expect(result.config).toEqual(
+      config({ legacyWebhook: { port: 8787, host: "0.0.0.0" }, accounts: { other: {} } }),
+    );
+    expect(result.changes).toEqual([expect.stringContaining("legacyWebhook: false")]);
     const untouched = config({ webhookUrl: "https://example.com/telegram" });
     expect(contract.normalizeCompatibilityConfig({ cfg: untouched }).config).toBe(untouched);
+  });
+
+  it("preserves explicit and inherited opt-outs while removing retired listener keys", () => {
+    const result = contract.normalizeCompatibilityConfig({
+      cfg: config({
+        legacyWebhook: false,
+        webhookPort: 8787,
+        accounts: {
+          inherited: { webhookPort: 8789, webhookHost: "0.0.0.0" },
+          disabled: { legacyWebhook: false, webhookPort: 8790 },
+          explicit: { legacyWebhook: { port: 9000 }, webhookPort: 8791 },
+        },
+      }),
+    });
+    expect(result.config).toEqual(
+      config({
+        legacyWebhook: false,
+        accounts: {
+          inherited: {},
+          disabled: { legacyWebhook: false },
+          explicit: { legacyWebhook: { port: 9000 } },
+        },
+      }),
+    );
+    expect(contract.normalizeCompatibilityConfig({ cfg: result.config })).toEqual({
+      config: result.config,
+      changes: [],
+    });
   });
 
   it.each(["0.0.0.0", undefined])(
@@ -101,6 +132,7 @@ describe("legacy webhook listener migration", () => {
   it("moves nested port config without removing the callback path or inventing a bind host", () => {
     const teams = createLegacyWebhookListenerDoctorContract({
       channelKey: "msteams",
+      defaultPort: 3978,
       webhookKey: "webhook",
       portKey: "port",
       hostKey: null,

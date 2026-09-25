@@ -1,6 +1,5 @@
 import { createConnection } from "node:net";
 import * as Lark from "@larksuiteoapi/node-sdk";
-import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanupFeishuMonitorStateForTests } from "./monitor.cleanup.test-helpers.js";
 import { monitorWebhook } from "./monitor.transport.js";
@@ -50,7 +49,7 @@ describe("Feishu webhook activity", () => {
     try {
       await waitForWebhookRoute(`http://127.0.0.1:${port}${path}`);
       statusSink.mockClear();
-      const server = expectDefined(getGatewayServer(), "webhook server");
+      const server = getGatewayServer();
       const responseClosed = new Promise<void>((resolve) => {
         server.once("request", (_req, res) => res.once("close", resolve));
       });

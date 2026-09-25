@@ -1,12 +1,22 @@
-import type { ChannelDoctorAdapter } from "openclaw/plugin-sdk/channel-contract";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
   classifyGatewayProbePath,
   isProtectedPluginRoutePathFromContext,
   resolvePluginRoutePathContext,
   resolveGatewayPort,
 } from "openclaw/plugin-sdk/gateway-config-runtime";
-import { listFeishuAccountIds, resolveFeishuAccount } from "./accounts.js";
+import { listFeishuAccountIds, mergeFeishuAccountConfig } from "./accounts.js";
+import type { FeishuConfig } from "./types.js";
 import { DEFAULT_FEISHU_WEBHOOK_PATH, normalizeFeishuWebhookPath } from "./webhook-path.js";
+
+export function resolveFeishuLegacyWebhookListener(
+  config: Pick<FeishuConfig, "legacyWebhook">,
+): { port: number; host: string } | undefined {
+  const listener = config.legacyWebhook;
+  return listener === false
+    ? undefined
+    : { port: listener?.port ?? 3000, host: listener?.host ?? "127.0.0.1" };
+}
 
 export function describeFeishuWebhookPathConflict(path: string): string | undefined {
   const normalized = normalizeFeishuWebhookPath(path);
@@ -26,23 +36,37 @@ export function describeFeishuWebhookPathConflict(path: string): string | undefi
   return `webhookPath ${JSON.stringify(path)} ${reason}. Set webhookPath to ${DEFAULT_FEISHU_WEBHOOK_PATH} and update the Feishu callback URL or reverse-proxy path to match.`;
 }
 
-export const collectFeishuWebhookWarnings: NonNullable<
-  ChannelDoctorAdapter["collectPreviewWarnings"]
-> = ({ cfg, env }) =>
-  listFeishuAccountIds(cfg).flatMap((accountId) => {
-    const account = resolveFeishuAccount({ cfg, accountId });
-    if (account.config.connectionMode !== "webhook") {
-      return [];
+export function collectFeishuWebhookNotes({
+  cfg,
+  env,
+}: {
+  cfg: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+}) {
+  const infoNotes: string[] = [];
+  const warningNotes: string[] = [];
+  for (const accountId of listFeishuAccountIds(cfg)) {
+    const account = mergeFeishuAccountConfig(cfg, accountId);
+    if (
+      cfg.channels?.feishu?.enabled === false ||
+      account.enabled === false ||
+      account.connectionMode !== "webhook"
+    ) {
+      continue;
     }
-    const route = account.config.webhookPath ?? DEFAULT_FEISHU_WEBHOOK_PATH;
+    const route = account.webhookPath ?? DEFAULT_FEISHU_WEBHOOK_PATH;
+    const legacyListener = resolveFeishuLegacyWebhookListener(account);
     const pathConflict = describeFeishuWebhookPathConflict(route);
     if (pathConflict) {
-      return [
-        `Feishu account "${accountId}" ${pathConflict} ${account.config.legacyWebhook ? "The configured legacyWebhook listener keeps the old path working. Move webhookPath and the callback or proxy before deleting legacyWebhook." : "Webhook startup is blocked until the path is changed."} Use Gateway port ${resolveGatewayPort(cfg, env)}.`,
-      ];
+      warningNotes.push(
+        `Feishu account "${accountId}" ${pathConflict} ${legacyListener ? "The legacyWebhook listener keeps the old path working. Move webhookPath and the callback or proxy before setting legacyWebhook:false." : "Webhook startup is blocked until the path is changed."} Use Gateway port ${resolveGatewayPort(cfg, env)}.`,
+      );
+      continue;
     }
     const upstream = `Gateway port ${resolveGatewayPort(cfg, env)}, path ${route}`;
-    return [
-      `Feishu account "${accountId}" uses ${upstream}. Point the Feishu callback URL or reverse-proxy upstream there; accounts sharing a path need distinct encrypt keys. ${account.config.legacyWebhook ? `The explicitly configured legacy listener on ${account.config.legacyWebhook.host ?? "127.0.0.1"}:${account.config.legacyWebhook.port} forwards into that same route. Remove legacyWebhook after updating the upstream; retirement is planned after a two-month migration window with no automatic cutoff.` : "No separate webhook listener is opened; the former default port 3000 is no longer used."}`,
-    ];
-  });
+    infoNotes.push(
+      `Feishu account "${accountId}" uses ${upstream}. Point the Feishu callback URL or reverse-proxy upstream there; accounts sharing a path need distinct encrypt keys. ${legacyListener ? `The legacy listener on ${legacyListener.host}:${legacyListener.port} forwards into that same route. After verifying delivery through the Gateway, set legacyWebhook:false to disable legacy forwarding for this account. Omitting the setting restores the inherited or default endpoint.` : "legacyWebhook:false disables legacy forwarding for this account; callbacks use the Gateway route."}`,
+    );
+  }
+  return { infoNotes, warningNotes };
+}

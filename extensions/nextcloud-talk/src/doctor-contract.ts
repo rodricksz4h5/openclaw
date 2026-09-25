@@ -10,6 +10,7 @@ import {
 const webhookContract = createLegacyWebhookListenerDoctorContract({
   channelKey: "nextcloud-talk",
   defaultHost: "0.0.0.0",
+  defaultPort: 8788,
 });
 
 const networkContract = createLegacyPrivateNetworkDoctorContract({

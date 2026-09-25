@@ -259,7 +259,7 @@ export function registerPluginHttpRoute(params: {
   reuseExistingSameOwner?: boolean;
   /** Throw when the route cannot be registered instead of returning a no-op cleanup. */
   throwOnFailure?: boolean;
-  /** Temporary forwarding endpoint for an explicitly configured retired channel port. */
+  /** Compatibility endpoint forwarding into this plugin-authenticated route. */
   legacyListener?: LegacyListener;
   pluginId?: string;
   /** Stable same-plugin sub-owner for replacement; omit consistently for legacy behavior. */

@@ -19,7 +19,7 @@ type NextcloudTalkConfig = Omit<z.input<typeof NextcloudTalkConfigSchema>, "acco
 };
 
 export type CoreConfig = {
-  channels?: {
+  channels?: NonNullable<OpenClawConfig["channels"]> & {
     "nextcloud-talk"?: NextcloudTalkConfig;
   };
   gateway?: OpenClawConfig["gateway"];

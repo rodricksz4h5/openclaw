@@ -9,7 +9,7 @@ type LegacyEndpoint = NonNullable<PluginHttpRouteRegistration["legacyListeners"]
 type LegacyListener = { server: Server; controller: AbortController };
 const endpointKey = ({ host, port }: LegacyEndpoint) => `${host ?? "<unspecified>"}:${port}`;
 
-/** Retired channel ports share Gateway dispatch and the route owner's existing handoff leases. */
+/** Compatibility ports share Gateway dispatch and the route owner's existing handoff leases. */
 export function startPluginLegacyListeners(params: {
   gatewayServer: Server;
   httpServers: Server[];
@@ -91,9 +91,14 @@ export function startPluginLegacyListeners(params: {
         });
       }
       server.on("error", (error) => {
+        const listener = listeners.get(key);
+        if (listener?.server === server) {
+          listeners.delete(key);
+          close(listener);
+        }
         params.warn(
           `Legacy webhook listener ${key} failed: ${String(error)}. ` +
-            "The Gateway webhook route remains available; update the external callback or reverse proxy to the Gateway port and remove legacyWebhook.",
+            "The Gateway webhook route remains available; update the external callback or reverse proxy to the Gateway port and set legacyWebhook: false.",
         );
       });
       if (endpoint.port === 0) {
@@ -102,7 +107,7 @@ export function startPluginLegacyListeners(params: {
           if (address && typeof address !== "string") {
             params.warn(
               `Legacy webhook port 0 selected ${address.address}:${address.port}; this port changes on restart. ` +
-                "Update the external callback or reverse proxy to the Gateway port and remove legacyWebhook.",
+                "Update the external callback or reverse proxy to the Gateway port and set legacyWebhook: false.",
             );
           }
         });

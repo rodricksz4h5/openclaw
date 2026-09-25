@@ -53,6 +53,7 @@ import {
   requireMockCall,
   requireRecord,
   telegramMessageUpdate,
+  telegramWebhookListenerCases,
   waitForWebhookState,
   type TestTelegramMessageUpdate,
 } from "./test-support/webhook-fixtures.js";
@@ -2294,35 +2295,16 @@ describe("startTelegramWebhook", () => {
     ).rejects.toThrow(/requires a non-empty secret token/i);
   });
 
-  it.each(
-    ["/health", "/healthz", "/ready", "/readyz", "/startup", "/startupz"].flatMap((path) => [
-      path,
-      `${path}?token=known`,
-    ]),
-  )("rejects startup on reserved Gateway path %s", async (path) => {
-    await expect(
-      withStartedWebhook({ secret: TELEGRAM_SECRET, path }, async () => undefined),
-    ).rejects.toThrow(/webhook path.*reserved.*Gateway probes/i);
-    expect(setWebhookSpy).not.toHaveBeenCalled();
-  });
-
-  it.each(["/api/channels/telegram", "/%61pi/channels/telegram"])(
-    "rejects Gateway-authenticated path %s without a legacy listener",
-    async (path) => {
-      await expect(
-        withStartedWebhook({ secret: TELEGRAM_SECRET, path }, async () => undefined),
-      ).rejects.toThrow("requires Gateway authentication");
-    },
-  );
-
   it.each([
-    { path: "/hook?token=known", legacyWebhook: undefined },
-    { path: "/ready/webhook", legacyWebhook: undefined },
-    { path: "/readyz?token=known", legacyWebhook: { port: 8787, host: "127.0.0.1" } },
+    { path: "/hook?token=known", legacyWebhook: false as const },
+    { path: "/ready/webhook", legacyWebhook: false as const },
+    { path: "/readyz?token=known", legacyWebhook: undefined },
     { path: "/%61pi/channels/telegram", legacyWebhook: { port: 8787, host: "127.0.0.1" } },
   ])("preserves exact webhook target $path", async ({ path, legacyWebhook }) => {
     await withStartedWebhook({ secret: TELEGRAM_SECRET, path, legacyWebhook }, async ({ port }) => {
-      legacyListenerForRequest.mockReturnValue(legacyWebhook);
+      legacyListenerForRequest.mockReturnValue(
+        legacyWebhook === false ? undefined : (legacyWebhook ?? { port: 8787, host: "127.0.0.1" }),
+      );
       const accepted = await postWebhookJson({
         url: webhookUrl(port, path),
         payload: JSON.stringify(telegramMessageUpdate(807, "exact route")),
@@ -2338,29 +2320,35 @@ describe("startTelegramWebhook", () => {
     });
   });
 
-  it("registers the configured public URL without changing reverse-proxy routing", async () => {
-    setWebhookSpy.mockClear();
-    const runtimeLog = vi.fn();
-    await withStartedWebhook(
-      {
-        secret: TELEGRAM_SECRET,
-        path: TELEGRAM_WEBHOOK_PATH,
-        runtime: { log: runtimeLog, error: vi.fn(), exit: vi.fn() },
-      },
-      async ({ port }) => {
-        expect(port).toBeGreaterThan(0);
-        expect(setWebhookSpy).toHaveBeenCalledTimes(1);
-        const setWebhookCall = requireMockCall(setWebhookSpy, 0, "setWebhook");
-        expect(setWebhookCall[0]).toBe(webhookUrl(port, TELEGRAM_WEBHOOK_PATH));
-        expect(requireRecord(setWebhookCall[1], "setWebhook options").secret_token).toBe(
-          TELEGRAM_SECRET,
-        );
-        expect(runtimeLog).toHaveBeenCalledWith(
-          `telegram webhook Gateway route ${TELEGRAM_WEBHOOK_PATH} (port 18789)`,
-        );
-      },
-    );
-  });
+  it.each(telegramWebhookListenerCases)(
+    "registers the public URL with $name legacy listener",
+    async ({ legacyWebhook, endpoint }) => {
+      const runtimeLog = vi.fn();
+      await withStartedWebhook(
+        {
+          secret: TELEGRAM_SECRET,
+          path: TELEGRAM_WEBHOOK_PATH,
+          legacyWebhook,
+          runtime: { log: runtimeLog, error: vi.fn(), exit: vi.fn() },
+        },
+        async ({ port }) => {
+          expect(gateway.registry.httpRoutes[0]?.legacyListeners).toEqual(
+            endpoint ? [endpoint] : undefined,
+          );
+          expect(port).toBeGreaterThan(0);
+          expect(setWebhookSpy).toHaveBeenCalledTimes(1);
+          const setWebhookCall = requireMockCall(setWebhookSpy, 0, "setWebhook");
+          expect(setWebhookCall[0]).toBe(webhookUrl(port, TELEGRAM_WEBHOOK_PATH));
+          expect(requireRecord(setWebhookCall[1], "setWebhook options").secret_token).toBe(
+            TELEGRAM_SECRET,
+          );
+          expect(runtimeLog).toHaveBeenCalledWith(
+            `telegram webhook Gateway route ${TELEGRAM_WEBHOOK_PATH} (port 18789)`,
+          );
+        },
+      );
+    },
+  );
 
   it.each([
     { topicsEnabled: false, shouldSerialize: true },

@@ -51,7 +51,9 @@ describe("Microsoft Teams QA transport adapter", () => {
       timestamp: Date.now(),
     }));
     let inboundActivity: Record<string, unknown> | undefined;
+    let inboundAuthorization: string | undefined;
     const webhook = createServer((request, response) => {
+      inboundAuthorization = request.headers.authorization;
       void (async () => {
         const chunks: Buffer[] = [];
         for await (const chunk of request) {
@@ -99,6 +101,7 @@ describe("Microsoft Teams QA transport adapter", () => {
 
       const config = adapter.createGatewayConfig({ baseUrl: `http://127.0.0.1:${webhookPort}` });
       expect(config.channels?.msteams?.webhook).toEqual({ path: "/api/messages" });
+      expect(config.channels?.msteams?.legacyWebhook).toBe(false);
       expect(config.channels?.msteams).toMatchObject({
         dmPolicy: "allowlist",
         allowFrom: ["00000000-0000-4000-8000-000000000002"],
@@ -112,6 +115,7 @@ describe("Microsoft Teams QA transport adapter", () => {
         threadId: "thread-root",
         replyToId: "quoted-parent",
       });
+      expect(inboundAuthorization).toBe(`Bearer ${bootstrapConfig.botToken}`);
       expect(inboundActivity).toMatchObject({
         text: "<at>openclaw</at> qa ingress",
         entities: [
@@ -200,6 +204,7 @@ describe("Microsoft Teams QA transport adapter", () => {
     try {
       const config = adapter.createGatewayConfig({ baseUrl: `http://127.0.0.1:${webhookPort}` });
       expect(config.channels?.msteams?.webhook).toEqual({ path: "/api/messages" });
+      expect(config.channels?.msteams?.legacyWebhook).toBe(false);
       await expect(
         adapter.sendInbound({
           accountId: "default",

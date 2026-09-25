@@ -17,6 +17,7 @@ import { DEFAULT_FEISHU_WEBHOOK_PATH, normalizeFeishuWebhookPath } from "./webho
 
 const webhookListenerMigration = createLegacyWebhookListenerDoctorContract({
   channelKey: "feishu",
+  defaultPort: 3000,
   defaultHost: "127.0.0.1",
 });
 

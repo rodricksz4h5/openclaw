@@ -109,11 +109,15 @@ export const MSTeamsConfigSchema = z
       .strict()
       .optional(),
     legacyWebhook: z
-      .object({
-        port: z.number().int().min(1).max(65535),
-        host: z.string().optional(),
-      })
-      .strict()
+      .union([
+        z.literal(false),
+        z
+          .object({
+            port: z.number().int().min(1).max(65535),
+            host: z.string().optional(),
+          })
+          .strict(),
+      ])
       .optional(),
     typingIndicator: z.boolean().optional(),
     mediaAllowHosts: z.array(z.string()).optional(),

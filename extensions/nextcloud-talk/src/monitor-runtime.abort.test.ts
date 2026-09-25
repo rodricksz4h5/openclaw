@@ -5,6 +5,7 @@ import {
 } from "openclaw/plugin-sdk/channel-test-helpers";
 import { describe, expect, it, vi } from "vitest";
 import { createRuntimeSpies } from "../../test-support/runtime-spies.js";
+import { NextcloudTalkConfigSchema } from "./config-schema.js";
 import { monitorNextcloudTalkProvider } from "./monitor-runtime.js";
 import { setNextcloudTalkRuntime } from "./runtime.js";
 
@@ -26,7 +27,7 @@ describe("Nextcloud Talk monitor abort", () => {
     { path: "/api/channels/talk", reason: "requires Gateway authentication" },
     { path: "/%61pi/channels/talk", reason: "requires Gateway authentication" },
   ])(
-    "blocks incompatible Gateway path $path without a legacy endpoint and preserves its legacy endpoint",
+    "blocks incompatible Gateway path $path with legacy ingress disabled and preserves default ingress",
     async ({ path, reason }) => {
       const core = createPluginRuntimeMock();
       const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -45,7 +46,13 @@ describe("Nextcloud Talk monitor abort", () => {
         const options = {
           config: {
             gateway: { port: 19001 },
-            channels: { "nextcloud-talk": { ...config.channels["nextcloud-talk"], webhookPath } },
+            channels: {
+              "nextcloud-talk": {
+                ...config.channels["nextcloud-talk"],
+                webhookPath,
+                legacyWebhook: false as const,
+              },
+            },
           },
           runtime: createRuntimeSpies(),
           statusSink,
@@ -67,7 +74,6 @@ describe("Nextcloud Talk monitor abort", () => {
             "nextcloud-talk": {
               ...config.channels["nextcloud-talk"],
               webhookPath: `${path}?tenant=a`,
-              legacyWebhook: { port: 8788 },
             },
           },
         },
@@ -79,7 +85,7 @@ describe("Nextcloud Talk monitor abort", () => {
         expect(registry.httpRoutes).toHaveLength(1);
         expect(statusSink).toHaveBeenCalledOnce();
         expect(logger.warn).toHaveBeenCalledWith(
-          expect.stringContaining("The configured legacy webhook listener remains available"),
+          expect.stringContaining("Legacy webhook listener 0.0.0.0:8788 remains available"),
         );
         expect(logger.info).not.toHaveBeenCalled();
       } finally {
@@ -88,38 +94,85 @@ describe("Nextcloud Talk monitor abort", () => {
     },
   );
 
-  it("unregisters the Gateway route before stopping its durable spool", async () => {
-    setNextcloudTalkRuntime(createPluginRuntimeMock());
-    const registry = createTestRegistry();
-    setActivePluginRegistry(registry);
-    const abortController = new AbortController();
-    const spoolStop = vi.fn(async () => {
-      expect(registry.httpRoutes).toHaveLength(0);
-    });
-    const statusSink = vi.fn();
-    const monitor = await monitorNextcloudTalkProvider({
-      config,
-      runtime: createRuntimeSpies(),
-      abortSignal: abortController.signal,
-      statusSink,
-      createSpool: () => ({
-        receive: vi.fn(async () => "accepted" as const),
-        ready: vi.fn(async () => {
-          expect(registry.httpRoutes).toHaveLength(0);
+  it.each([
+    {
+      label: "implicit default",
+      settings: {},
+      accountId: "default",
+      endpoint: { port: 8788, host: "0.0.0.0" },
+    },
+    {
+      label: "explicit port",
+      settings: { legacyWebhook: { port: 9876 } },
+      accountId: "default",
+      endpoint: { port: 9876, host: "0.0.0.0" },
+    },
+    {
+      label: "disabled listener",
+      settings: { legacyWebhook: false as const },
+      accountId: "default",
+      endpoint: undefined,
+    },
+    {
+      label: "inherited listener",
+      settings: { legacyWebhook: { port: 9876, host: "127.0.0.1" }, accounts: { secondary: {} } },
+      accountId: "secondary",
+      endpoint: { port: 9876, host: "127.0.0.1" },
+    },
+    {
+      label: "inherited opt-out",
+      settings: { legacyWebhook: false as const, accounts: { secondary: {} } },
+      accountId: "secondary",
+      endpoint: undefined,
+    },
+    {
+      label: "account override",
+      settings: {
+        legacyWebhook: false as const,
+        accounts: { secondary: { legacyWebhook: { port: 9877, host: "127.0.0.2" } } },
+      },
+      accountId: "secondary",
+      endpoint: { port: 9877, host: "127.0.0.2" },
+    },
+  ])(
+    "registers $label and unregisters ingress before stopping its spool",
+    async ({ settings, accountId, endpoint }) => {
+      setNextcloudTalkRuntime(createPluginRuntimeMock());
+      const registry = createTestRegistry();
+      setActivePluginRegistry(registry);
+      const abortController = new AbortController();
+      const spoolStop = vi.fn(async () => {
+        expect(registry.httpRoutes).toHaveLength(0);
+      });
+      const statusSink = vi.fn();
+      const channelConfig = { ...config.channels["nextcloud-talk"], ...settings };
+      expect(NextcloudTalkConfigSchema.safeParse(channelConfig).success).toBe(true);
+      const monitor = await monitorNextcloudTalkProvider({
+        config: { channels: { "nextcloud-talk": channelConfig } },
+        accountId,
+        runtime: createRuntimeSpies(),
+        abortSignal: abortController.signal,
+        statusSink,
+        createSpool: () => ({
+          receive: vi.fn(async () => "accepted" as const),
+          ready: vi.fn(async () => {
+            expect(registry.httpRoutes).toHaveLength(0);
+          }),
+          stop: spoolStop,
+          waitForIdle: vi.fn(async () => {}),
         }),
-        stop: spoolStop,
-        waitForIdle: vi.fn(async () => {}),
-      }),
-    });
+      });
 
-    expect(registry.httpRoutes).toHaveLength(1);
-    expect(statusSink).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ lifecycle: "ready" }),
-    );
-    abortController.abort();
-    await monitor.stop();
-    expect(spoolStop).toHaveBeenCalledOnce();
-  });
+      expect(registry.httpRoutes).toHaveLength(1);
+      expect(registry.httpRoutes[0]?.legacyListeners).toEqual(endpoint ? [endpoint] : undefined);
+      expect(statusSink).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ lifecycle: "ready" }),
+      );
+      abortController.abort();
+      await monitor.stop();
+      expect(spoolStop).toHaveBeenCalledOnce();
+    },
+  );
 
   it("does not register ingress or publish ready when aborted during spool startup", async () => {
     setNextcloudTalkRuntime(createPluginRuntimeMock());

@@ -1,6 +1,7 @@
 // Telegram tests cover doctor plugin behavior.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mergeTelegramAccountConfig } from "./account-config.js";
 import { telegramDoctor } from "./doctor.js";
 
 const resolveCommandSecretRefsViaGatewayMock = vi.hoisted(() => vi.fn());
@@ -15,6 +16,15 @@ async function collectPreviewWarnings(cfg: OpenClawConfig, env?: NodeJS.ProcessE
     throw new Error("expected Telegram preview warning collector");
   }
   return await collect({ cfg, doctorFixCommand: DOCTOR_FIX_COMMAND, env });
+}
+
+async function collectWebhookNotes(cfg: OpenClawConfig, env: NodeJS.ProcessEnv = {}) {
+  const run = telegramDoctor.runConfigSequence;
+  if (!run) {
+    throw new Error("expected Telegram Doctor config sequence");
+  }
+  const notes = await run({ cfg, env, shouldRepair: false });
+  return { infoNotes: notes.infoNotes ?? [], warningNotes: notes.warningNotes ?? [] };
 }
 
 async function repairConfig(cfg: OpenClawConfig) {
@@ -85,7 +95,7 @@ describe("telegram doctor", () => {
     lookupTelegramChatIdMock.mockReset();
   });
 
-  it("migrates explicit webhook ports and warns how to move the callback", async () => {
+  it("migrates explicit webhook ports and explains how to move the callback", async () => {
     const normalized = telegramDoctor.normalizeCompatibilityConfig!({
       cfg: {
         channels: {
@@ -105,9 +115,86 @@ describe("telegram doctor", () => {
     });
     expect(normalized.config.channels?.telegram).not.toHaveProperty("webhookPort");
     expect(normalized.config.channels?.telegram).not.toHaveProperty("webhookHost");
-    expect(await collectPreviewWarnings(normalized.config)).toContainEqual(
-      expect.stringContaining("Gateway port 18789/hook"),
+    const notes = await collectWebhookNotes(normalized.config);
+    expect(notes.infoNotes).toContainEqual(expect.stringContaining("Gateway port 18789/hook"));
+    expect(notes.warningNotes).toEqual([]);
+  });
+
+  it("preserves canonical root and account opt-outs while retiring listener keys", () => {
+    const { config } = telegramDoctor.normalizeCompatibilityConfig!({
+      cfg: {
+        channels: {
+          telegram: {
+            legacyWebhook: false,
+            webhookPort: 8787,
+            accounts: {
+              inherited: { webhookPort: 9000 },
+              disabled: { legacyWebhook: false, webhookHost: "0.0.0.0" },
+            },
+          },
+        },
+      } as OpenClawConfig,
+    });
+    expect(config.channels?.telegram).not.toHaveProperty("webhookPort");
+    for (const accountId of ["inherited", "disabled"]) {
+      const account = mergeTelegramAccountConfig(config, accountId);
+      expect(account.legacyWebhook).toBe(false);
+      expect(account).not.toHaveProperty("webhookPort");
+      expect(account).not.toHaveProperty("webhookHost");
+    }
+  });
+
+  it.each([
+    { legacyWebhook: undefined, description: "legacy listener 127.0.0.1:8787" },
+    { legacyWebhook: { port: 9000 }, description: "legacy listener 127.0.0.1:9000" },
+    {
+      legacyWebhook: false as const,
+      description: "legacyWebhook: false disables legacy forwarding for this account",
+    },
+  ])("describes the effective listener %j", async ({ legacyWebhook, description }) => {
+    const cfg: OpenClawConfig = {
+      channels: {
+        telegram: { botToken: "tok", webhookUrl: "https://example.test/hook", legacyWebhook },
+      },
+    };
+    const notes = await collectWebhookNotes(cfg);
+    expect(notes.infoNotes).toContainEqual(expect.stringContaining(description));
+    expect(notes.warningNotes).toEqual([]);
+    expect((await collectPreviewWarnings(cfg)).join("\n")).not.toContain("legacy listener");
+  });
+
+  it("describes raw SecretRef-backed webhook config without resolving credentials", async () => {
+    const notes = await collectWebhookNotes({
+      channels: {
+        telegram: {
+          botToken: { source: "file", provider: "fixture", id: "/bot-token" },
+          webhookSecret: "synthetic-webhook-secret",
+          webhookUrl: "https://example.test/hook",
+        },
+      },
+    });
+    expect(notes.infoNotes).toContainEqual(
+      expect.stringContaining("legacy listener 127.0.0.1:8787"),
     );
+    expect(notes.warningNotes).toEqual([]);
+    expect(resolveCommandSecretRefsViaGatewayMock).not.toHaveBeenCalled();
+    expect(inspectTelegramAccountMock).not.toHaveBeenCalled();
+    expect(lookupTelegramChatIdMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { botToken: "tok" },
+    { botToken: "tok", webhookUrl: "https://example.test/hook", enabled: false },
+    {
+      botToken: "tok",
+      webhookUrl: "https://example.test/hook",
+      accounts: { default: { enabled: false } },
+    },
+  ])("omits webhook notes for polling or disabled accounts %j", async (telegram) => {
+    expect(await collectWebhookNotes({ channels: { telegram } })).toEqual({
+      infoNotes: [],
+      warningNotes: [],
+    });
   });
 
   it("strips retired tuning knobs at root, account, group, and topic scope", () => {
@@ -630,12 +717,12 @@ describe("telegram doctor", () => {
       },
     } satisfies OpenClawConfig;
 
-    expect((await collectPreviewWarnings(cfg)).join("\n")).not.toContain("reserved");
+    expect((await collectWebhookNotes(cfg)).warningNotes.join("\n")).not.toContain("reserved");
 
     cfg.channels.telegram.accounts.ops.webhookUrl = `https://example.test${reservedPath}`;
     cfg.channels.telegram.accounts.ops.webhookPath = reservedPath;
 
-    expect((await collectPreviewWarnings(cfg)).join("\n")).toContain(
+    expect((await collectWebhookNotes(cfg)).warningNotes.join("\n")).toContain(
       `Telegram account "ops" resolves webhookPath to ${reservedPath}, which is reserved`,
     );
 
@@ -643,13 +730,15 @@ describe("telegram doctor", () => {
       ...cfg,
       channels: { telegram: { ...cfg.channels.telegram, enabled: false } },
     } satisfies OpenClawConfig;
-    expect((await collectPreviewWarnings(disabledCfg)).join("\n")).not.toContain("reserved");
+    expect((await collectWebhookNotes(disabledCfg)).warningNotes.join("\n")).not.toContain(
+      "reserved",
+    );
   });
 
   it.each(["/api/channels/telegram", "/%61pi/channels/telegram"])(
     "explains Gateway authentication for webhook path %s",
     async (webhookPath) => {
-      const warnings = await collectPreviewWarnings({
+      const notes = await collectWebhookNotes({
         channels: {
           telegram: {
             botToken: "tok",
@@ -659,7 +748,7 @@ describe("telegram doctor", () => {
           },
         },
       });
-      expect(warnings).toContainEqual(
+      expect(notes.warningNotes).toContainEqual(
         expect.stringContaining(
           "requires Gateway authentication. Set webhookPath to /telegram-webhook",
         ),
@@ -667,8 +756,8 @@ describe("telegram doctor", () => {
     },
   );
 
-  it("keeps preview warnings available for a malformed webhook path", async () => {
-    const warnings = await collectPreviewWarnings({
+  it("keeps Doctor notes available for a malformed webhook path", async () => {
+    const notes = await collectWebhookNotes({
       channels: {
         telegram: {
           botToken: "tok",
@@ -678,8 +767,10 @@ describe("telegram doctor", () => {
         },
       },
     });
-    expect(warnings).toContainEqual(expect.stringContaining("old default listener on port 8787"));
-    expect(warnings.join("\n")).not.toContain("reserved for Gateway probes");
+    expect(notes.infoNotes).toContainEqual(
+      expect.stringContaining("legacy listener 127.0.0.1:8787"),
+    );
+    expect(notes.warningNotes.join("\n")).not.toContain("reserved for Gateway probes");
   });
 
   it("identifies an explicit default account in the webhook path warning", async () => {
@@ -699,10 +790,10 @@ describe("telegram doctor", () => {
       },
     } satisfies OpenClawConfig;
 
-    expect((await collectPreviewWarnings(cfg)).join("\n")).toContain(
-      "before removing legacyWebhook",
+    expect((await collectWebhookNotes(cfg)).warningNotes.join("\n")).toContain(
+      "before setting legacyWebhook: false",
     );
-    expect((await collectPreviewWarnings(cfg)).join("\n")).toContain(
+    expect((await collectWebhookNotes(cfg)).warningNotes.join("\n")).toContain(
       'Telegram account "default" resolves webhookPath to /healthz, which is reserved',
     );
   });

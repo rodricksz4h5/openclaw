@@ -10,6 +10,7 @@ import {
 
 const webhookMigration = createLegacyWebhookListenerDoctorContract({
   channelKey: "msteams",
+  defaultPort: 3978,
   webhookKey: "webhook",
   portKey: "port",
   hostKey: null,

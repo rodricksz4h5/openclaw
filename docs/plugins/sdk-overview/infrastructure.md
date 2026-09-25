@@ -305,9 +305,9 @@ an exact probe route. The same private facade exports `resolvePluginRoutePathCon
 and `isProtectedPluginRoutePathFromContext` for canonical protected-path checks.
 If the callback falls under a protected namespace, choose the channel's safe default
 path before moving the external callback or reverse proxy to the Gateway port.
-An explicit legacy listener can still serve its old path during that migration.
+A legacy listener can still serve its old path during that migration.
 
-For a shipped, explicitly configured channel port, registration can temporarily
+For a shipped channel listener, registration can
 include `legacyListener: { port, host? }`. The Gateway forwards only requests for
 that registration's paths through the same HTTP dispatch, preserving the original
 socket and body. It leaves the callback URL intact, including paths that resemble
@@ -315,25 +315,32 @@ Gateway node-capability URLs. It never exposes core HTTP endpoints on the compat
 Legacy listeners require `auth: "plugin"`: the channel continues authenticating
 its old callback path, including paths under `/api/channels`. The Gateway port
 keeps its protected-path authentication policy. This exception applies only to
-requests received on the explicitly configured retired port; it grants no Gateway
+requests received on the compatibility port; it grants no Gateway
 operator scopes and does not waive channel signature checks or work admission.
 `getWebhookLegacyListener(req)` returns its frozen configured `{ port, host? }`
 endpoint, or `undefined` for an ordinary Gateway request; headers cannot set it.
 Filter account targets by this endpoint before signature resolution when old ports
 distinguished accounts sharing a path and secret. Ordinary Gateway requests still
 need an unambiguous account path or authentication identity.
-The channel's Doctor migration must warn the operator and preserve the explicit
-endpoint; do not supply a default port. Plugin-owned Doctor contracts can compose
+The channel owns effective listener resolution: preserve its shipped default when
+`legacyWebhook` is omitted, use an explicit endpoint object when configured, and
+register no legacy listener when it is `false`. Resolve the same endpoint for
+runtime routing and Doctor guidance. Plugin-owned Doctor contracts can compose
 `createLegacyWebhookListenerDoctorContract` from
 `openclaw/plugin-sdk/runtime-doctor-migrations` to preserve authored ports and
-inherited bind addresses through the normal backed-up config write.
+inherited bind addresses through the normal backed-up config write. An explicit
+legacy host without a port uses the channel's shipped default port. Canonical
+`false` settings remain authoritative when Doctor removes retired keys.
+Return normal listener guidance in `runConfigSequence().infoNotes` so Doctor
+labels it as information. Keep actionable configuration problems in
+`warningNotes`; `changeNotes` describe applied repairs.
 Account leases sharing a route can retain
 separate endpoints, and an account restart retains only its endpoints while the route
 returns retryable 503 responses. Bind failure warns without disabling the Gateway
 route. After the operator changes the provider callback or reverse proxy to reach
-the Gateway port, remove `legacyWebhook` from the channel config to close the old
-listener. This compatibility option is deprecated; remove it only after the
-supported release upgrade window for explicitly configured ports has ended.
+the Gateway port, set `legacyWebhook: false` in the channel config to close the old
+listener. Omitting the setting restores the shipped default; retirement is a
+separate change, not a deadline imposed by this route cutover.
 
 ### Post-ack webhook work
 

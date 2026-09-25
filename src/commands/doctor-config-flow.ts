@@ -509,6 +509,7 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
     emitDoctorNotes({
       note,
       changeNotes: channelDoctorSequence.changeNotes,
+      infoNotes: channelDoctorSequence.infoNotes,
       warningNotes: channelDoctorSequence.warningNotes,
     });
 

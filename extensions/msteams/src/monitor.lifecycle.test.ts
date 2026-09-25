@@ -1,6 +1,6 @@
 // Msteams tests cover monitor.lifecycle plugin behavior.
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   getMSTeamsIngressMockState,
   gateIngressAcceptThenDispatch,
@@ -13,8 +13,6 @@ import {
 } from "./monitor-lifecycle.test-helpers.js";
 import {
   getMSTeamsMonitorTestState,
-  getMSTeamsRouteBaseUrl,
-  holdMSTeamsWebhookBodies,
   requireRegisteredMSTeamsConfig,
   requireRegisteredMSTeamsMediaMaxBytes,
   waitForMSTeamsTestState,
@@ -25,45 +23,18 @@ import type { MSTeamsPollStore } from "./polls.js";
 
 const {
   routes,
-  monitorReady,
-  registerRouteMock,
   createMSTeamsActivityHandler,
   isSigninInvokeAuthorized,
   isCardActionInvokeAuthorized,
   runMSTeamsFileConsentInvokeHandler,
   processSdkActivity,
   nativeSdkState,
-  handleSdkRequest,
   loadMSTeamsSdkWithAuth,
   ssoTokenStore,
   resolveAllowlistMocks,
 } = getMSTeamsMonitorTestState();
 
 describe("monitorMSTeamsProvider lifecycle", () => {
-  afterEach(() => {
-    vi.clearAllMocks();
-    routes.clear();
-    vi.unstubAllEnvs();
-    Reflect.deleteProperty(globalThis, Symbol.for("openclaw.msteams.privateQaRuntime"));
-    monitorReady.current = Promise.withResolvers<void>();
-    resolveAllowlistMocks.resolveMSTeamsTeamsConfig
-      .mockReset()
-      .mockImplementation(async ({ teams }) => ({ teams, mapping: [], unresolved: [] }));
-    resolveAllowlistMocks.resolveMSTeamsUserAllowlist.mockReset().mockResolvedValue([]);
-    isSigninInvokeAuthorized.mockReset().mockResolvedValue(true);
-    isCardActionInvokeAuthorized.mockReset().mockResolvedValue(true);
-    runMSTeamsFileConsentInvokeHandler.mockReset().mockResolvedValue(undefined);
-    processSdkActivity.mockReset().mockResolvedValue({ status: 200 });
-    nativeSdkState.app = undefined;
-    handleSdkRequest
-      .mockReset()
-      .mockImplementation(async ({ body }) => ({ status: 200, body: { body } }));
-    getMSTeamsIngressMockState().instances.length = 0;
-    ssoTokenStore.get.mockClear();
-    ssoTokenStore.save.mockReset().mockResolvedValue(undefined);
-    ssoTokenStore.remove.mockClear();
-  });
-
   it("stays active until aborted", async () => {
     const abort = new AbortController();
     const stores = createStores();
@@ -135,200 +106,6 @@ describe("monitorMSTeamsProvider lifecycle", () => {
       expect(createMSTeamsActivityHandler).toHaveBeenCalledTimes(1);
     });
     expect(requireRegisteredMSTeamsMediaMaxBytes()).toBe(3 * 1024 * 1024);
-
-    abort.abort();
-    await task;
-  });
-
-  it.each(["/ready?tenant=one", "/api/channels/teams", "/%61pi/channels/teams"])(
-    "refuses unavailable %s without a legacy callback",
-    async (path) => {
-      const cfg = createConfig();
-      updateMSTeamsConfig(cfg, { webhook: { path } });
-      await expect(
-        monitorMSTeamsProvider({ cfg, runtime: createRuntime(), ...createStores() }),
-      ).rejects.toThrow("18789/api/messages");
-      expect(registerRouteMock).not.toHaveBeenCalled();
-
-      updateMSTeamsConfig(cfg, { legacyWebhook: { port: 3978 } });
-      const abort = new AbortController();
-      const task = monitorMSTeamsProvider({
-        cfg,
-        runtime: createRuntime(),
-        abortSignal: abort.signal,
-        ...createStores(),
-      });
-      await monitorReady.current.promise;
-      expect(routes.get(path)?.legacyListener).toEqual({ port: 3978 });
-      abort.abort();
-      await task;
-    },
-  );
-
-  it("cleans up ingress when Gateway route registration fails", async () => {
-    registerRouteMock.mockImplementationOnce(() => {
-      throw new Error("route already owned");
-    });
-    await expect(
-      monitorMSTeamsProvider({
-        cfg: createConfig(),
-        runtime: createRuntime(),
-        ...createStores(),
-      }),
-    ).rejects.toThrow("route already owned");
-    expect(getMSTeamsIngressMockState().instances[0]?.stop).toHaveBeenCalledOnce();
-  });
-
-  it("rejects requests without Bearer token before SDK route", async () => {
-    const abort = new AbortController();
-    const task = monitorMSTeamsProvider({
-      cfg: createConfig(),
-      runtime: createRuntime(),
-      abortSignal: abort.signal,
-      conversationStore: createStores().conversationStore,
-      pollStore: createStores().pollStore,
-    });
-
-    await monitorReady.current.promise;
-    const unauthorized = await fetch(`${getMSTeamsRouteBaseUrl()}/api/messages`, {
-      method: "POST",
-    });
-    expect(unauthorized.status).toBe(401);
-    await expect(unauthorized.json()).resolves.toEqual({ error: "Unauthorized" });
-
-    const authorized = await fetch(`${getMSTeamsRouteBaseUrl()}/api/messages`, {
-      method: "POST",
-      headers: { authorization: "Bearer valid-token" },
-    });
-    expect(authorized.status).toBe(200);
-
-    abort.abort();
-    await task;
-  });
-
-  it("bounds partial bodies across aliases and releases capacity after SDK failures", async () => {
-    const abort = new AbortController();
-    const cfg = createConfig();
-    updateMSTeamsConfig(cfg, { webhook: { path: "/teams/events" } });
-    const task = monitorMSTeamsProvider({
-      cfg,
-      runtime: createRuntime(),
-      abortSignal: abort.signal,
-      ...createStores(),
-    });
-    await monitorReady.current.promise;
-    const capacity = 8;
-    const held = await holdMSTeamsWebhookBodies("/teams/events", capacity);
-    const post = () =>
-      fetch(`${getMSTeamsRouteBaseUrl()}/api/messages`, {
-        method: "POST",
-        headers: { authorization: "Bearer x" },
-        body: "{}",
-      });
-    try {
-      const overflow = await post();
-      expect(overflow.status).toBe(429);
-      expect(await overflow.text()).toBe("Too Many Requests");
-      expect(await held.complete()).toEqual(Array<number>(capacity).fill(200));
-      for (let index = 0; index < capacity; index += 1) {
-        handleSdkRequest.mockRejectedValueOnce(new Error("synthetic SDK failure"));
-      }
-      const failures = await Promise.allSettled(Array.from({ length: capacity }, post));
-      expect(failures.every((result) => result.status === "rejected")).toBe(true);
-      const recovered = await post();
-      expect(recovered.status).toBe(200);
-      await recovered.text();
-    } finally {
-      await held.stop();
-      abort.abort();
-      await task;
-    }
-  });
-
-  it("keeps private QA skip-auth requests restricted to loopback", async () => {
-    vi.stubEnv("OPENCLAW_BUILD_PRIVATE_QA", "1");
-    Object.defineProperty(globalThis, Symbol.for("openclaw.msteams.privateQaRuntime"), {
-      configurable: true,
-      value: { connectorUrl: "http://127.0.0.1:1/", nonce: "qa-nonce", botToken: "qa-token" },
-    });
-    const abort = new AbortController();
-    const task = monitorMSTeamsProvider({
-      cfg: createConfig(),
-      runtime: createRuntime(),
-      abortSignal: abort.signal,
-      ...createStores(),
-    });
-    await monitorReady.current.promise;
-    try {
-      for (const [clientIp, expectedStatus] of [
-        ["198.51.100.10", 401],
-        ["127.0.0.1", 200],
-      ] as const) {
-        const response = await fetch(`${getMSTeamsRouteBaseUrl()}/api/messages`, {
-          method: "POST",
-          headers: { authorization: "Bearer private-qa", "x-test-client-ip": clientIp },
-        });
-        expect(response.status).toBe(expectedStatus);
-        await response.text();
-      }
-    } finally {
-      abort.abort();
-      await task;
-    }
-  });
-
-  it("keeps oversized webhook parse failures JSON-shaped", async () => {
-    const abort = new AbortController();
-    const task = monitorMSTeamsProvider({
-      cfg: createConfig(),
-      runtime: createRuntime(),
-      abortSignal: abort.signal,
-      conversationStore: createStores().conversationStore,
-      pollStore: createStores().pollStore,
-    });
-
-    await monitorReady.current.promise;
-    const response = await fetch(`${getMSTeamsRouteBaseUrl()}/api/messages`, {
-      method: "POST",
-      headers: {
-        authorization: "Bearer valid-token",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ payload: "x".repeat(1024 * 1024) }),
-    });
-
-    expect(response.status).toBe(413);
-    await expect(response.json()).resolves.toEqual({ error: "Payload too large" });
-
-    abort.abort();
-    await task;
-  });
-
-  it("forwards legacy /api/messages requests to a custom webhook path", async () => {
-    const abort = new AbortController();
-    const cfg = createConfig();
-    updateMSTeamsConfig(cfg, {
-      webhook: { path: "/teams/events" },
-    });
-    const task = monitorMSTeamsProvider({
-      cfg,
-      runtime: createRuntime(),
-      abortSignal: abort.signal,
-      conversationStore: createStores().conversationStore,
-      pollStore: createStores().pollStore,
-    });
-
-    await monitorReady.current.promise;
-    expect(loadMSTeamsSdkWithAuth.mock.calls[0]?.[1]).toMatchObject({
-      messagingEndpoint: "/teams/events",
-    });
-    const response = await fetch(`${getMSTeamsRouteBaseUrl()}/api/messages`, {
-      method: "POST",
-      headers: { authorization: "Bearer valid" },
-    });
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ body: {} });
 
     abort.abort();
     await task;

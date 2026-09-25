@@ -12,6 +12,7 @@ import type { CoreConfig, NextcloudTalkInboundMessage } from "./types.js";
 import {
   DEFAULT_NEXTCLOUD_TALK_WEBHOOK_PATH,
   describeNextcloudTalkWebhookRouteConflict,
+  resolveNextcloudTalkLegacyWebhook,
 } from "./webhook-route.js";
 import {
   createNextcloudTalkWebhookSpool,
@@ -59,8 +60,9 @@ export async function monitorNextcloudTalkProvider(
 
   const path = account.config.webhookPath ?? DEFAULT_NEXTCLOUD_TALK_WEBHOOK_PATH;
   const gatewayPort = resolveGatewayPort({ gateway: cfg.gateway });
+  const legacyListener = resolveNextcloudTalkLegacyWebhook(account.config);
   const routeConflict = describeNextcloudTalkWebhookRouteConflict(path, gatewayPort);
-  if (routeConflict && !account.config.legacyWebhook) {
+  if (routeConflict && !legacyListener) {
     throw new Error(`[nextcloud-talk:${account.accountId}] ${routeConflict}`);
   }
 
@@ -122,7 +124,7 @@ export async function monitorNextcloudTalkProvider(
     }
     unregister = registerNextcloudTalkWebhook({
       accountId: account.accountId,
-      legacyListener: account.config.legacyWebhook,
+      legacyListener,
       path,
       secret: account.secret,
       isBackendAllowed: (backend) => {
@@ -149,10 +151,10 @@ export async function monitorNextcloudTalkProvider(
   }
   opts.statusSink?.(channelReadyPatch());
 
-  if (routeConflict) {
+  if (routeConflict && legacyListener) {
     logger.warn(
       `[nextcloud-talk:${account.accountId}] ${routeConflict} ` +
-        "The configured legacy webhook listener remains available; verify the new route before removing legacyWebhook.",
+        `Legacy webhook listener ${legacyListener.host}:${legacyListener.port} remains available; verify the new route before setting legacyWebhook: false.`,
     );
     return { stop };
   }
@@ -160,16 +162,10 @@ export async function monitorNextcloudTalkProvider(
     `[nextcloud-talk:${account.accountId}] Gateway webhook route ready at port ${gatewayPort}${path}; ` +
       "point the Nextcloud bot callback or reverse-proxy upstream here.",
   );
-  if (account.config.legacyWebhook) {
-    logger.warn(
-      `[nextcloud-talk:${account.accountId}] legacy webhook port ${account.config.legacyWebhook.port} is deprecated. ` +
-        `Point the Nextcloud bot callback or reverse-proxy upstream to Gateway port ${gatewayPort}${path}, ` +
-        "then remove legacyWebhook. The compatibility listener is scheduled for removal after the two-month migration window.",
-    );
-  } else {
-    logger.warn(
-      `[nextcloud-talk:${account.accountId}] the former default webhook port 8788 is no longer opened. ` +
-        `Point the Nextcloud bot callback or reverse-proxy upstream to Gateway port ${gatewayPort}${path} and verify delivery.`,
+  if (legacyListener) {
+    logger.info(
+      `[nextcloud-talk:${account.accountId}] legacy webhook listener ${legacyListener.host}:${legacyListener.port} forwards to the Gateway route. ` +
+        "After verifying the callback or proxy upstream uses the Gateway port, set legacyWebhook: false to disable this account's legacy forwarding.",
     );
   }
 

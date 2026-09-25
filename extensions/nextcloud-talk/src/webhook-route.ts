@@ -3,8 +3,17 @@ import {
   isProtectedPluginRoutePathFromContext,
   resolvePluginRoutePathContext,
 } from "openclaw/plugin-sdk/gateway-config-runtime";
+import type { NextcloudTalkAccountConfig } from "./types.js";
 
 export const DEFAULT_NEXTCLOUD_TALK_WEBHOOK_PATH = "/nextcloud-talk-webhook";
+
+export function resolveNextcloudTalkLegacyWebhook(config: NextcloudTalkAccountConfig) {
+  const listener = config.legacyWebhook;
+  if (listener === false) {
+    return undefined;
+  }
+  return { port: listener?.port ?? 8788, host: listener?.host ?? "0.0.0.0" };
+}
 
 export function describeNextcloudTalkWebhookRouteConflict(
   path: string,

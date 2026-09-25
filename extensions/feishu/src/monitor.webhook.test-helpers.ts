@@ -6,8 +6,12 @@ import {
   createEmptyPluginRegistry,
   setActivePluginRegistry,
 } from "openclaw/plugin-sdk/plugin-test-runtime";
+import {
+  fetchWithSsrFGuard,
+  ssrfPolicyFromDangerouslyAllowPrivateNetwork,
+} from "openclaw/plugin-sdk/ssrf-runtime";
 import { canonicalizeWebhookRouteKey } from "openclaw/plugin-sdk/webhook-ingress";
-import { afterAll, vi } from "vitest";
+import { afterAll, onTestFinished, vi } from "vitest";
 import type { ClawdbotConfig, RuntimeEnv } from "../runtime-api.js";
 import { FeishuConfigSchema } from "./config-schema.js";
 import type { FeishuStatusSink, monitorFeishuProvider } from "./monitor.js";
@@ -127,11 +131,18 @@ export function signFeishuPayload(params: {
 
 export async function postSignedPayload(url: string, payload: Record<string, unknown>) {
   const rawBody = JSON.stringify(payload);
-  return await fetch(url, {
-    method: "POST",
-    headers: signFeishuPayload({ encryptKey: "encrypt_key", rawBody }),
-    body: rawBody,
+  const { response, release } = await fetchWithSsrFGuard({
+    url,
+    init: {
+      method: "POST",
+      headers: signFeishuPayload({ encryptKey: "encrypt_key", rawBody }),
+      body: rawBody,
+    },
+    policy: ssrfPolicyFromDangerouslyAllowPrivateNetwork(true),
+    auditContext: "feishu-webhook-test",
   });
+  onTestFinished(release);
+  return response;
 }
 
 export async function sendRawSignedFeishuRequest(params: {

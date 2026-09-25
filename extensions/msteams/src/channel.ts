@@ -65,7 +65,7 @@ import {
 } from "./approval-native.js";
 import { resolveMSTeamsAccount, type ResolvedMSTeamsAccount } from "./channel-config.js";
 import { msteamsSetupPlugin } from "./channel.setup.js";
-import { collectMSTeamsMutableAllowlistWarnings, collectMSTeamsWebhookWarnings } from "./doctor.js";
+import { msteamsDoctor } from "./doctor.js";
 import {
   MSTEAMS_GROUP_MANAGEMENT_ACTIONS,
   withMSTeamsGraphMutationCurrentness,
@@ -373,14 +373,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount, ProbeMSTeamsRe
         resolveToolPolicy: resolveMSTeamsGroupToolPolicy,
       },
       approvalCapability: msTeamsApprovalCapability,
-      doctor: {
-        dmAllowFromMode: "topOnly",
-        groupModel: "hybrid",
-        groupAllowFromFallbackToAllowFrom: true,
-        warnOnEmptyGroupSenderAllowlist: true,
-        collectMutableAllowlistWarnings: collectMSTeamsMutableAllowlistWarnings,
-        collectPreviewWarnings: collectMSTeamsWebhookWarnings,
-      },
+      doctor: msteamsDoctor,
       messaging: {
         targetPrefixes: ["msteams", "teams"],
         directTargetStyle: "user-prefixed",

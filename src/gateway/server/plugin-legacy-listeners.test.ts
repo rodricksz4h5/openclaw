@@ -400,17 +400,28 @@ describe("legacy channel webhook ports", () => {
     },
   );
 
-  it("reports an occupied compatibility port while keeping the Gateway route operational", async () => {
-    register({ legacyListener: endpoint(0) });
+  it("reports an occupied port and retries it after the conflicting route is removed", async () => {
+    const removeBlocker = register({
+      path: "/occupying-webhook",
+      legacyListener: { port: claim.port + 1, host: "0.0.0.0" },
+    });
+    await listening();
+    const blocker = httpServers[1]!;
+    register({ legacyListener: endpoint(1) });
     await Promise.resolve();
-    const listener = httpServers[1]!;
+    const listener = httpServers[2]!;
     await once(listener, "error");
     expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(`Legacy webhook listener 127.0.0.1:${claim.port} failed`),
+      expect.stringContaining(`Legacy webhook listener 127.0.0.1:${claim.port + 1} failed`),
     );
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("update the external callback or reverse proxy to the Gateway port"),
     );
     expect(await (await fetch(url(0))).text()).toBe("accepted");
+
+    const closed = once(blocker, "close");
+    removeBlocker();
+    await closed;
+    expect(await (await fetch(url(1))).text()).toBe("accepted");
   });
 });

@@ -2,7 +2,6 @@
 import crypto from "node:crypto";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { expectDefined } from "@openclaw/normalization-core";
-import { getActivePluginRegistry } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { resolveFeishuRuntimeAccount } from "./accounts.js";
 import { normalizeCompatibilityConfig } from "./doctor-contract.js";
@@ -75,93 +74,6 @@ afterAll(() => {
 });
 
 describe("Feishu webhook signed-request e2e", () => {
-  it.each([
-    ...["/health", "/healthz", "/ready", "/readyz", "/startup", "/startupz"]
-      .flatMap((path) => [path, `${path}?tenant=test`])
-      .map((path) => ({ path, reason: "is reserved for Gateway probes" })),
-    { path: "/api/channels/feishu", reason: "requires Gateway authentication" },
-    { path: "/%61pi/channels/feishu?tenant=test", reason: "requires Gateway authentication" },
-  ])("requires an explicit legacy listener for restricted path $path", async ({ path, reason }) => {
-    const port = await getGatewayPort();
-    const abortController = new AbortController();
-    const invoke = vi.fn(async () => ({ accepted: true }));
-    const account = createFeishuWebhookTestAccount("reserved-path", path);
-    const eventDispatcher = new Lark.EventDispatcher({ encryptKey: "encrypt_key" });
-    vi.spyOn(eventDispatcher, "invoke").mockImplementation(invoke);
-    const params = {
-      account,
-      accountId: account.accountId,
-      abortSignal: abortController.signal,
-      eventDispatcher,
-      runtime: { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
-    };
-    await expect(monitorWebhook(params)).rejects.toThrow(
-      `webhookPath ${JSON.stringify(path)} ${reason}`,
-    );
-    legacyListener.value = { port: 3000, host: "127.0.0.1" };
-    const monitor = monitorWebhook({
-      ...params,
-      account: { ...account, config: { ...account.config, legacyWebhook: legacyListener.value } },
-    });
-    try {
-      const response = await postSignedPayload(`http://127.0.0.1:${port}${path}`, {
-        schema: "2.0",
-        event: {},
-      });
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ accepted: true });
-      expect(invoke).toHaveBeenCalledTimes(1);
-      expect(params.runtime.log).toHaveBeenCalledWith(
-        expect.stringContaining("before removing legacyWebhook"),
-      );
-    } finally {
-      legacyListener.value = undefined;
-      abortController.abort();
-      await monitor;
-    }
-  });
-
-  it.each([
-    { name: "omitted host", configured: { port: 3000 }, host: "127.0.0.1" },
-    { name: "explicit wildcard", configured: { port: 3000, host: "0.0.0.0" }, host: "0.0.0.0" },
-    { name: "explicit address", configured: { port: 3000, host: "127.0.0.2" }, host: "127.0.0.2" },
-  ])(
-    "prepares the legacy listener for $name and accepts its signed callback",
-    async ({ configured, host }) => {
-      const path = "/hook-legacy-bind-address";
-      const port = await getGatewayPort();
-      const account = createFeishuWebhookTestAccount("legacy-bind-address", path);
-      const abort = new AbortController();
-      const eventDispatcher = new Lark.EventDispatcher({ encryptKey: "encrypt_key" });
-      const invoke = vi.spyOn(eventDispatcher, "invoke").mockResolvedValue({ accepted: true });
-      const monitor = monitorWebhook({
-        account: { ...account, config: { ...account.config, legacyWebhook: configured } },
-        accountId: account.accountId,
-        abortSignal: abort.signal,
-        eventDispatcher,
-        runtime: createRuntimeSpies(),
-      });
-      const url = `http://127.0.0.1:${port}${path}`;
-      try {
-        await waitForWebhookRoute(url);
-        const endpoint = { port: 3000, host };
-        expect(
-          getActivePluginRegistry()?.httpRoutes.find((route) => route.path === path)
-            ?.legacyListeners,
-        ).toEqual([endpoint]);
-        legacyListener.value = endpoint;
-        const response = await postSignedPayload(url, { schema: "2.0", event: {} });
-        expect(response.status).toBe(200);
-        await expect(response.json()).resolves.toEqual({ accepted: true });
-        expect(invoke).toHaveBeenCalledOnce();
-      } finally {
-        legacyListener.value = undefined;
-        abort.abort();
-        await monitor;
-      }
-    },
-  );
-
   it("dispatches shared Gateway routes and honors trusted legacy-listener metadata", async () => {
     const path = "/hook-shared-accounts";
     const port = await getGatewayPort();

@@ -9,10 +9,10 @@ import {
 import type { App } from "@microsoft/teams.apps";
 import { acquireTestPortBlock } from "openclaw/plugin-sdk/test-env";
 import type { registerPluginHttpRoute } from "openclaw/plugin-sdk/webhook-ingress";
-import { afterAll, beforeAll, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import type { OpenClawConfig } from "../runtime-api.js";
 import type { createMSTeamsActivityHandler as CreateMSTeamsActivityHandler } from "./monitor-handler.js";
-import "./monitor-ingress-mock.test-support.js";
+import { getMSTeamsIngressMockState } from "./monitor-ingress-mock.test-support.js";
 import type { loadMSTeamsSdkWithAuth as LoadMSTeamsSdkWithAuth } from "./sdk.js";
 
 type MSTeamsUserResolution = {
@@ -138,15 +138,16 @@ vi.mock("./sdk.js", () => ({
   }),
 }));
 
+const logger = vi.hoisted(() => ({
+  info: vi.fn(),
+  error: vi.fn(),
+  warn: vi.fn(),
+  debug: vi.fn(),
+}));
 vi.mock("./runtime.js", () => ({
   getMSTeamsRuntime: () => ({
     logging: {
-      getChildLogger: () => ({
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-        debug: vi.fn(),
-      }),
+      getChildLogger: () => logger,
     },
     channel: {
       text: {
@@ -159,6 +160,30 @@ vi.mock("./runtime.js", () => ({
 vi.mock("./sso-token-store.js", () => ({
   createMSTeamsSsoTokenStoreFs: () => ssoTokenStore,
 }));
+
+afterEach(() => {
+  vi.clearAllMocks();
+  routes.clear();
+  vi.unstubAllEnvs();
+  Reflect.deleteProperty(globalThis, Symbol.for("openclaw.msteams.privateQaRuntime"));
+  monitorReady.current = Promise.withResolvers<void>();
+  resolveAllowlistMocks.resolveMSTeamsTeamsConfig
+    .mockReset()
+    .mockImplementation(async ({ teams }) => ({ teams, mapping: [], unresolved: [] }));
+  resolveAllowlistMocks.resolveMSTeamsUserAllowlist.mockReset().mockResolvedValue([]);
+  isSigninInvokeAuthorized.mockReset().mockResolvedValue(true);
+  isCardActionInvokeAuthorized.mockReset().mockResolvedValue(true);
+  runMSTeamsFileConsentInvokeHandler.mockReset().mockResolvedValue(undefined);
+  processSdkActivity.mockReset().mockResolvedValue({ status: 200 });
+  nativeSdkState.app = undefined;
+  handleSdkRequest
+    .mockReset()
+    .mockImplementation(async ({ body }) => ({ status: 200, body: { body } }));
+  getMSTeamsIngressMockState().instances.length = 0;
+  ssoTokenStore.get.mockClear();
+  ssoTokenStore.save.mockReset().mockResolvedValue(undefined);
+  ssoTokenStore.remove.mockClear();
+});
 
 export async function waitForMSTeamsTestState(
   assertion: () => void | Promise<void>,
@@ -230,6 +255,7 @@ export function getMSTeamsMonitorTestState() {
     nativeSdkState,
     handleSdkRequest,
     loadMSTeamsSdkWithAuth,
+    logger,
     ssoTokenStore,
     resolveAllowlistMocks,
   };

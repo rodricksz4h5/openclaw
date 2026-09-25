@@ -8,6 +8,7 @@ export function createConfig(): OpenClawConfig {
     channels: {
       msteams: {
         enabled: true,
+        legacyWebhook: false,
         appId: "app-id",
         appPassword: "app-password", // pragma: allowlist secret
         tenantId: "tenant-id",

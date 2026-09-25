@@ -9,6 +9,7 @@ import type {
 /** Preserve explicitly configured webhook listeners while moving ingress onto Gateway routes. */
 export function createLegacyWebhookListenerDoctorContract(params: {
   channelKey: string;
+  defaultPort: number;
   portKey?: string;
   hostKey?: string | null;
   webhookKey?: string;
@@ -34,7 +35,7 @@ export function createLegacyWebhookListenerDoctorContract(params: {
     legacyConfigRules: [
       {
         path: ["channels", params.channelKey],
-        message: `${prefix} webhook listeners moved to Gateway routes. Run "openclaw doctor --fix" to preserve explicitly configured ports as temporary legacyWebhook listeners.`,
+        message: `${prefix} webhook listeners moved to Gateway routes. Run "openclaw doctor --fix" to preserve explicitly configured listener settings as legacyWebhook.`,
         match: (value) => {
           const accounts = asObjectRecord(asObjectRecord(value)?.accounts);
           return hasLegacy(value) || Object.values(accounts ?? {}).some(hasLegacy);
@@ -56,9 +57,8 @@ export function createLegacyWebhookListenerDoctorContract(params: {
           const next = { ...entry };
           const port = Object.hasOwn(listener, portKey)
             ? listener[portKey]
-            : accountId
-              ? (canonicalRoot?.port ?? inherited?.[portKey])
-              : undefined;
+            : ((accountId ? (canonicalRoot?.port ?? inherited?.[portKey]) : undefined) ??
+              params.defaultPort);
           const inheritedHost = accountId
             ? canonicalRoot
               ? canonicalRoot.host
@@ -70,14 +70,14 @@ export function createLegacyWebhookListenerDoctorContract(params: {
             changes.push(
               `Removed ${legacyPath} legacy listener keys; ${pathPrefix}.legacyWebhook is already configured.`,
             );
-          } else if (port !== undefined) {
-            next.legacyWebhook = { port, ...(host !== undefined ? { host } : {}) };
+          } else if (accountId && root?.legacyWebhook === false) {
             changes.push(
-              `Moved ${legacyPath}.${portKey} to ${pathPrefix}.legacyWebhook. Point the external callback or reverse proxy at the Gateway port and webhook path, verify delivery, then remove legacyWebhook. Compatibility is scheduled for removal after the two-month migration window.`,
+              `Removed ${legacyPath} legacy listener keys; ${prefix}.legacyWebhook: false keeps this account's inherited listener disabled.`,
             );
           } else {
+            next.legacyWebhook = { port, ...(host !== undefined ? { host } : {}) };
             changes.push(
-              `Removed ${legacyPath}.${hostKey}; no explicit webhook port was configured. Point the external callback or reverse proxy at the Gateway port and webhook path; no legacy listener will open.`,
+              `Moved ${legacyPath} listener settings to ${pathPrefix}.legacyWebhook. Point the external callback or reverse proxy at the Gateway port and webhook path, verify delivery, then set legacyWebhook: false to disable legacy forwarding.`,
             );
           }
           const updated = params.webhookKey ? { ...listener } : next;

@@ -15,6 +15,7 @@ import {
 
 const webhookListenerMigration = createLegacyWebhookListenerDoctorContract({
   channelKey: "telegram",
+  defaultPort: 8787,
   defaultHost: "127.0.0.1",
 });
 

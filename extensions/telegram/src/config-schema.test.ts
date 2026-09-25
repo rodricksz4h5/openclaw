@@ -200,20 +200,23 @@ describe("telegram disableAudioPreflight schema", () => {
 });
 
 describe("telegram webhook schema", () => {
-  it("accepts a migrated legacy webhook endpoint", () => {
-    expectTelegramConfigValid({
-      webhookUrl: "https://example.com/telegram-webhook",
-      webhookSecret: "secret",
-      legacyWebhook: { port: 0 },
-    });
-  });
+  it.each([undefined, false, { port: 0 }, { port: 65535 }])(
+    "accepts canonical legacy webhook setting %j",
+    (legacyWebhook) => {
+      expectTelegramConfigValid({
+        webhookUrl: "https://example.com/telegram-webhook",
+        webhookSecret: "secret",
+        legacyWebhook,
+      });
+    },
+  );
 
-  it("rejects a negative legacy webhook port", () => {
+  it.each([-1, 65536])("rejects an out-of-range legacy webhook port %s", (port) => {
     expectTelegramConfigIssue(
       {
         webhookUrl: "https://example.com/telegram-webhook",
         webhookSecret: "secret",
-        legacyWebhook: { port: -1 },
+        legacyWebhook: { port },
       },
       "legacyWebhook.port",
     );

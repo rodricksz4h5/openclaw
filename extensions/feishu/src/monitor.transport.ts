@@ -40,7 +40,10 @@ import {
 } from "./monitor.state.js";
 import type { ResolvedFeishuAccount } from "./types.js";
 import { DEFAULT_FEISHU_WEBHOOK_PATH, normalizeFeishuWebhookPath } from "./webhook-path.js";
-import { describeFeishuWebhookPathConflict } from "./webhook-route.js";
+import {
+  describeFeishuWebhookPathConflict,
+  resolveFeishuLegacyWebhookListener,
+} from "./webhook-route.js";
 
 type MonitorTransportParams = {
   account: ResolvedFeishuAccount;
@@ -382,7 +385,7 @@ export async function monitorWebSocket({
 type FeishuWebhookTarget = MonitorTransportParams & {
   path: string;
   rawPath: string;
-  legacyListener?: ResolvedFeishuAccount["config"]["legacyWebhook"];
+  legacyListener: ReturnType<typeof resolveFeishuLegacyWebhookListener>;
   encryptKey: string;
   preAuthInFlightLimiter: ReturnType<typeof createWebhookInFlightLimiter>;
 };
@@ -578,9 +581,7 @@ async function handleFeishuWebhook(
 
 export async function monitorWebhook(params: MonitorTransportParams): Promise<void> {
   const { account, accountId, runtime, abortSignal, statusSink } = params;
-  const legacyListener = account.config.legacyWebhook
-    ? { ...account.config.legacyWebhook, host: account.config.legacyWebhook.host ?? "127.0.0.1" }
-    : undefined;
+  const legacyListener = resolveFeishuLegacyWebhookListener(account.config);
   const encryptKey = account.encryptKey?.trim();
   if (!encryptKey) {
     throw new Error(`Feishu account "${accountId}" webhook mode requires encryptKey`);
@@ -593,7 +594,7 @@ export async function monitorWebhook(params: MonitorTransportParams): Promise<vo
     );
   }
   const pathConflict = describeFeishuWebhookPathConflict(rawPath);
-  if (pathConflict && !account.config.legacyWebhook) {
+  if (pathConflict && !legacyListener) {
     throw new Error(`Feishu account "${accountId}" ${pathConflict}`);
   }
   if (abortSignal?.aborted) {
@@ -619,6 +620,22 @@ export async function monitorWebhook(params: MonitorTransportParams): Promise<vo
     preAuthInFlightLimiter,
   });
   let unregisterRoute: (() => void) | undefined;
+  let cleanupStarted = false;
+  const cleanup = () => {
+    if (cleanupStarted) {
+      return;
+    }
+    cleanupStarted = true;
+    registration.unregister();
+    unregisterRoute?.();
+    if (
+      ![...webhookTargets.values()].some((targets) =>
+        targets.some((target) => target.accountId === accountId),
+      )
+    ) {
+      clearFeishuBotIdentityState(accountId);
+    }
+  };
   try {
     unregisterRoute = registerPluginHttpRoute({
       path,
@@ -636,19 +653,13 @@ export async function monitorWebhook(params: MonitorTransportParams): Promise<vo
     statusSink?.(channelReadyPatch({ lastConnectedAt: connectedAt, lastEventAt: connectedAt }));
     runtime?.log?.(
       pathConflict
-        ? `feishu[${accountId}]: ${pathConflict} The configured legacy listener keeps the old path working; move the path and callback before removing legacyWebhook.`
-        : `feishu[${accountId}]: webhook registered on Gateway port ${params.gatewayPort ?? 18789} at ${rawPath}; point the Feishu callback URL or reverse-proxy upstream to this Gateway route. ${account.config.legacyWebhook ? "The configured legacy listener forwards here; remove legacyWebhook after updating the upstream (planned retirement after a two-month migration window, no automatic cutoff)." : "No separate webhook listener is opened; the former default port 3000 is no longer used."}`,
+        ? `feishu[${accountId}]: ${pathConflict} The legacy listener keeps the old path working; move the path and callback before setting legacyWebhook:false.`
+        : `feishu[${accountId}]: webhook registered on Gateway port ${params.gatewayPort ?? 18789} at ${rawPath}; point the Feishu callback URL or reverse-proxy upstream to this Gateway route. ${legacyListener ? `The legacy listener on ${legacyListener.host}:${legacyListener.port} forwards here; set legacyWebhook:false after verifying delivery through the Gateway to disable legacy forwarding for this account.` : "legacyWebhook:false disables legacy forwarding for this account."}`,
     );
-    await waitUntilAbort(abortSignal);
+    // A successor can publish its identity before registering its transport.
+    // Finish cleanup during abort, before yielding to that successor.
+    await waitUntilAbort(abortSignal, cleanup);
   } finally {
-    registration.unregister();
-    unregisterRoute?.();
-    if (
-      ![...webhookTargets.values()].some((targets) =>
-        targets.some((target) => target.accountId === accountId),
-      )
-    ) {
-      clearFeishuBotIdentityState(accountId);
-    }
+    cleanup();
   }
 }

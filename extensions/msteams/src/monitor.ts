@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { waitUntilAbort } from "openclaw/plugin-sdk/channel-outbound";
-import { isLoopbackHost } from "openclaw/plugin-sdk/request-url";
+import { isLocalDirectRequest } from "openclaw/plugin-sdk/request-url";
+import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
 import {
   applyBasicWebhookRequestGuards,
   createWebhookInFlightLimiter,
@@ -23,7 +24,7 @@ import {
 import { resolveMSTeamsSdkCloudOptions } from "./cloud.js";
 import { createMSTeamsConversationStoreState } from "./conversation-store-state.js";
 import type { MSTeamsConversationStore } from "./conversation-store.js";
-import { collectMSTeamsWebhookWarnings, resolveMSTeamsWebhookPathIssue } from "./doctor.js";
+import { runMSTeamsWebhookDoctorSequence } from "./doctor.js";
 import { formatUnknownError } from "./errors.js";
 import { runMSTeamsFeedbackInvokeHandler } from "./feedback-invoke.js";
 import { runMSTeamsFileConsentInvokeHandler } from "./file-consent-invoke.js";
@@ -66,6 +67,7 @@ import {
 } from "./sdk.js";
 import { createMSTeamsSsoTokenStoreFs } from "./sso-token-store.js";
 import { resolveMSTeamsCredentials } from "./token.js";
+import { resolveMSTeamsLegacyWebhook, resolveMSTeamsWebhookPathIssue } from "./webhook-route.js";
 
 type MonitorMSTeamsOpts = {
   cfg: OpenClawConfig;
@@ -101,8 +103,9 @@ export async function monitorMSTeamsProvider(
     return { app: null, shutdown: async () => {} };
   }
   const appId = creds.appId; // Extract for use in closures
+  const legacyListener = resolveMSTeamsLegacyWebhook(msteamsCfg);
   const webhookPathIssue = resolveMSTeamsWebhookPathIssue({ cfg });
-  if (webhookPathIssue && !msteamsCfg.legacyWebhook) {
+  if (webhookPathIssue && !legacyListener) {
     throw new Error(webhookPathIssue);
   }
 
@@ -221,10 +224,16 @@ export async function monitorMSTeamsProvider(
 
   const configuredPath = (msteamsCfg.webhook?.path ?? "/api/messages") as `/${string}`;
   const privateQaRuntime = resolveMSTeamsPrivateQaRuntime();
-  const legacyListener = msteamsCfg.legacyWebhook;
+  const privateQaAuthorization = privateQaRuntime
+    ? `Bearer ${await privateQaRuntime.token()}`
+    : undefined;
   const unregisterRoutes: Array<() => void> = [];
   const inFlightLimiter = createWebhookInFlightLimiter({ maxTrackedKeys: 1 });
-  for (const warning of collectMSTeamsWebhookWarnings({ cfg })) {
+  const webhookNotes = runMSTeamsWebhookDoctorSequence({ cfg });
+  for (const note of webhookNotes.infoNotes ?? []) {
+    log.info(note);
+  }
+  for (const warning of webhookNotes.warningNotes) {
     log.warn?.(warning);
   }
   const ssoConnectionName =
@@ -240,9 +249,11 @@ export async function monitorMSTeamsProvider(
           if (!applyBasicWebhookRequestGuards({ req, res, allowMethods: [method] })) {
             return;
           }
-          // Private QA bypasses SDK JWT validation, so its route stays loopback-only.
+          // Private QA bypasses SDK JWT validation; require its per-run token and direct loopback.
           if (
-            (privateQaRuntime && !isLoopbackHost(req.socket.remoteAddress ?? "")) ||
+            (privateQaAuthorization &&
+              (!safeEqualSecret(req.headers.authorization, privateQaAuthorization) ||
+                !isLocalDirectRequest(req))) ||
             !req.headers.authorization?.startsWith("Bearer ")
           ) {
             res.writeHead(401, { "Content-Type": "application/json" });
@@ -303,7 +314,8 @@ export async function monitorMSTeamsProvider(
               auth: "plugin",
               pluginId: "msteams",
               source: "webhook",
-              throwOnFailure: true,
+              throwOnFailure: routePath === path,
+              log: (message) => log.warn?.(message),
               legacyListener,
             }),
           );

@@ -214,11 +214,15 @@ const TelegramAccountSchemaBase = z
         "Local webhook route path served by the gateway listener. Defaults to /telegram-webhook.",
       ),
     legacyWebhook: z
-      .object({ port: z.number().int().nonnegative(), host: z.string().optional() })
-      .strict()
+      .union([
+        z.literal(false),
+        z
+          .object({ port: z.number().int().nonnegative().max(65535), host: z.string().optional() })
+          .strict(),
+      ])
       .optional()
       .describe(
-        "Temporary legacy webhook forwarding endpoint. After moving the reverse proxy to the Gateway webhook route, remove this object.",
+        "Webhook forwarding endpoint. Omitted keeps 127.0.0.1:8787; set false after moving the reverse proxy to the Gateway webhook route.",
       ),
     webhookCertPath: z
       .string()

@@ -119,3 +119,18 @@ export function expectWebhookBotScopesAborted(createTelegramBotSpy: unknown): vo
     expect((signal as AbortSignal).aborted).toBe(true);
   }
 }
+
+export const telegramWebhookListenerCases = [
+  { name: "implicit", legacyWebhook: undefined, endpoint: { port: 8787, host: "127.0.0.1" } },
+  { name: "explicit", legacyWebhook: { port: 9000 }, endpoint: { port: 9000, host: "127.0.0.1" } },
+  { name: "disabled", legacyWebhook: false, endpoint: undefined },
+] as const;
+
+export const telegramReservedGatewayPaths = [
+  "/health",
+  "/healthz",
+  "/ready",
+  "/readyz",
+  "/startup",
+  "/startupz",
+].flatMap((path) => [path, `${path}?token=known`]);

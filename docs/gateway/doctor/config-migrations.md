@@ -31,17 +31,27 @@ not enter a restart loop. Add the reported binding and restart the Gateway.
 Telegram, Feishu, Microsoft Teams, and Nextcloud Talk now receive webhooks on
 Gateway HTTP routes. Their plugin-owned Doctor migrations move an explicitly
 configured `webhookPort` (Teams: `webhook.port`) and effective bind host into
-`legacyWebhook: { port, host? }`. Doctor validates and backs up the config through
-the normal write flow. The temporary listener forwards only its registered
+`legacyWebhook: { port, host? }`. An explicit host without a port keeps that host
+with the channel's previous default port. Doctor validates and backs up the config
+through the normal write flow. The compatibility listener forwards only its registered
 webhook routes through the same Gateway request pipeline, preserving signatures
 and retry responses during channel restarts.
 
 Update the external callback or reverse-proxy upstream to the Gateway port and
-the channel's webhook path, verify delivery, then remove `legacyWebhook`.
-Compatibility removal is planned after a two-month migration window; listeners
-do not expire automatically. Configs that omitted the old port do not open a
-compatibility listener. Doctor and channel startup identify the new destination
-and the former default port to replace.
+the channel's webhook path, verify delivery, then set `legacyWebhook: false` to
+close the old port. Omitting `legacyWebhook` preserves the previous listener
+defaults whenever the account uses its webhook transport: Telegram `127.0.0.1:8787`,
+Feishu `127.0.0.1:3000`, Microsoft Teams port `3978` on all interfaces, and
+Nextcloud Talk `0.0.0.0:8788`. An explicit object selects its configured endpoint;
+an account-level value overrides the channel-level setting. Doctor explains the
+canonical Gateway route and opt-out without changing implicit settings.
+A shared compatibility port closes when no account retains that endpoint.
+
+This behavior is the same for existing and new installations. It needs no upgrade
+eligibility check or migration receipt. Removing `legacyWebhook: false` restores
+the default listener; removing an explicit object also returns to the default.
+Retiring these listeners is a separate future change, with no removal deadline
+or automatic expiry introduced here.
 
 Telegram re-registers its configured public `webhookUrl` at startup. It preserves
 that URL because its reverse-proxy upstream cannot be inferred safely. Accounts

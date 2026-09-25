@@ -268,9 +268,6 @@ function resolveTestClientIp(remoteAddress: string | undefined): string | undefi
 
 function waitForWebhookResponseClose(): Promise<void> {
   const server = getGatewayServer();
-  if (!server) {
-    throw new Error("expected webhook server");
-  }
   return new Promise<void>((resolve) => {
     server.once("request", (_req, res) => res.once("close", resolve));
   });
@@ -458,9 +455,6 @@ describe("Feishu webhook security hardening", () => {
       const url = `http://127.0.0.1:${port}${path}`;
       await waitForWebhookRoute(url);
       const server = getGatewayServer();
-      if (!server) {
-        throw new Error("expected webhook server");
-      }
       const heldRequestsReceived = new Promise<void>((resolve) => {
         let requestCount = 0;
         const onRequest = () => {

@@ -17,7 +17,7 @@ export type MonitorTelegramOpts = {
   abortSignal?: AbortSignal;
   useWebhook?: boolean;
   webhookPath?: string;
-  legacyWebhook?: { port: number; host?: string };
+  legacyWebhook?: false | { port: number; host?: string };
   webhookSecret?: string;
   proxyFetch?: typeof fetch;
   webhookUrl?: string;
