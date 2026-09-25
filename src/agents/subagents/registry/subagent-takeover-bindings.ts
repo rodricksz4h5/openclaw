@@ -5,6 +5,7 @@
  */
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { resolveInboundConversationResolution } from "../../../channels/conversation-resolution.js";
+import { resolveThreadBindingAccountId } from "../../../channels/thread-bindings-policy.js";
 import { getRuntimeConfig } from "../../../config/config.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import {
@@ -13,7 +14,6 @@ import {
   type SessionBindingService,
 } from "../../../infra/outbound/session-binding-service.js";
 import { createSubsystemLogger } from "../../../logging/subsystem.js";
-import { resolveSpawnChannelAccountId } from "../../spawn-plan.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 const AGENT_SPAWN_TAKEOVER_UNBIND_REASON = "agent-spawn-takeover-retired";
@@ -39,7 +39,7 @@ export async function retireAgentSpawnTakeoverBindings(params: {
       continue;
     }
     checkedChildren.add(run.childSessionKey);
-    const accountId = resolveSpawnChannelAccountId({
+    const accountId = resolveThreadBindingAccountId({
       cfg: params.cfg,
       channel,
       accountId: origin.accountId,

@@ -30,6 +30,7 @@ import { restoreSubagentRunsFromDisk } from "./subagent-registry-state.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import { deleteSubagentSessionForCleanup } from "./subagent-session-cleanup.js";
 import { loadSubagentSessionEntry } from "./subagent-session-reconciliation.js";
+import { startAgentSpawnTakeoverSweep } from "./subagent-takeover-bindings.js";
 
 type RestoredQueuedFailureSettlementClaim = {
   entry: SubagentRunRecord;
@@ -160,9 +161,7 @@ export function createSubagentRegistryRestorer(config: {
     }
     const cfg = getRuntimeConfig();
     // Older agent spawns could bind the requester's own chat; retire those takeovers.
-    void import("./subagent-takeover-bindings.js").then(({ startAgentSpawnTakeoverSweep }) =>
-      startAgentSpawnTakeoverSweep({ runs, warn }),
-    );
+    startAgentSpawnTakeoverSweep({ runs, warn });
     const requesterTurns = new Map<string, Map<string, SubagentRunRecord[]>>();
     const resolveRequesterAgentId = (entry: SubagentRunRecord) =>
       resolveSubagentRequesterAgentId(cfg, entry);

@@ -107,6 +107,7 @@ describe("/subagents spawn --thread", () => {
     chatType: "group" | "channel" | "direct";
     threadId?: string;
     text?: string;
+    assertOwnerCurrent?: () => void;
   }) {
     return handleSubagentsSpawnAction({
       requesterKey: "agent:main:main",
@@ -119,7 +120,11 @@ describe("/subagents spawn --thread", () => {
           AccountId: "default",
           MessageThreadId: params.threadId,
         },
-        command: { channel: params.channel, senderId: "user-1" },
+        command: {
+          channel: params.channel,
+          senderId: "user-1",
+          assertOwnerCurrent: params.assertOwnerCurrent,
+        },
       },
     } as never);
   }
@@ -149,6 +154,28 @@ describe("/subagents spawn --thread", () => {
       spawnMode: "session",
       expectsCompletionMessage: false,
     });
+  });
+
+  it("stops before the thread bind when owner authority is revoked during preparation", async () => {
+    let checks = 0;
+    const result = await run({
+      channel: "discord",
+      to: "channel:123",
+      chatType: "group",
+      assertOwnerCurrent: () => {
+        checks += 1;
+        if (checks > 1) {
+          throw new Error("owner authority revoked");
+        }
+      },
+    }).then(replyText, (error: unknown) => String(error));
+
+    expect(result).toContain("owner authority revoked");
+    expect(hoisted.bind).not.toHaveBeenCalled();
+    const methods = hoisted.callGatewayMock.mock.calls.map(
+      ([call]) => (call as { method?: string }).method,
+    );
+    expect(methods).not.toContain("agent");
   });
 
   it("refuses in a direct chat and starts nothing", async () => {

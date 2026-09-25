@@ -18,12 +18,12 @@ import {
   formatThreadBindingSpawnDisabledError,
   resolveThreadBindingIdleTimeoutMsForChannel,
   resolveThreadBindingMaxAgeMsForChannel,
+  resolveThreadBindingAccountId,
   resolveThreadBindingSpawnPolicy,
 } from "../../../channels/thread-bindings-policy.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { DeliveryContext } from "../../../utils/delivery-context.types.js";
 import { summarizeSpawnError } from "../../spawn-pipeline.js";
-import { resolveSpawnChannelAccountId } from "../../spawn-plan.js";
 import { getSessionBindingService } from "./subagent-spawn.runtime.js";
 
 export const CHILD_THREAD_UNAVAILABLE_ERROR =
@@ -49,7 +49,7 @@ export async function bindChildThreadForSubagentSpawn(params: {
   if (!channel) {
     return { status: "error", error: CHILD_THREAD_UNAVAILABLE_ERROR };
   }
-  const accountId = resolveSpawnChannelAccountId({
+  const accountId = resolveThreadBindingAccountId({
     cfg: params.cfg,
     channel,
     accountId: params.requester.accountId,

@@ -46,6 +46,8 @@ export const handleSubagentsCommand: CommandHandler = defineAuthorizedTextComman
         ? null
         : { action: "agents", restTokens: [] };
     },
+    // Binding a new thread to a persistent child is an owner action, like /acp spawn.
+    ownerOnly: (_params, match) => match.action === "spawn",
     silentUnauthorized: true,
   },
   async (params, { action, restTokens }) => {

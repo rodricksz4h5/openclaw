@@ -1,9 +1,5 @@
 import crypto from "node:crypto";
 import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import {
   DEFAULT_SUBAGENT_MAX_CHILDREN_PER_AGENT,
   DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH,
 } from "../config/agent-limits.js";
@@ -23,23 +19,6 @@ export function mintSpawnSessionKey(params: {
 }): string {
   const kind = params.backend === "acp" ? "acp" : "subagent";
   return `agent:${params.targetAgentId}:${kind}:${crypto.randomUUID()}`;
-}
-
-export function resolveSpawnChannelAccountId(params: {
-  cfg: OpenClawConfig;
-  channel?: string;
-  accountId?: string;
-}): string | undefined {
-  const channel = normalizeOptionalLowercaseString(params.channel);
-  const explicitAccountId = normalizeOptionalString(params.accountId);
-  if (explicitAccountId) {
-    return explicitAccountId;
-  }
-  if (!channel) {
-    return undefined;
-  }
-  const channels = params.cfg.channels as Record<string, { defaultAccount?: unknown } | undefined>;
-  return normalizeOptionalString(channels?.[channel]?.defaultAccount) ?? "default";
 }
 
 export function resolveSpawnAdmission(params: {

@@ -34,7 +34,6 @@ export async function handleSubagentsSpawnAction(
     return commandReply(`⚠️ ${CHILD_THREAD_UNAVAILABLE_ERROR} Nothing was started.`);
   }
 
-  params.command.assertOwnerCurrent?.();
   const result = await spawnSubagentDirect(
     {
       task,
@@ -44,6 +43,8 @@ export async function handleSubagentsSpawnAction(
       childThread: { boundBy: normalizeOptionalString(params.command.senderId) ?? "unknown" },
     },
     {
+      // Rechecked before each spawn effect, including the thread bind.
+      assertActive: params.command.assertOwnerCurrent,
       agentSessionKey: requesterKey,
       agentChannel: params.ctx.OriginatingChannel ?? params.command.channel,
       agentAccountId: params.ctx.AccountId,
