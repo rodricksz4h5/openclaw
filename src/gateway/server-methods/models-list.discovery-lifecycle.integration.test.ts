@@ -93,10 +93,11 @@ it("models.list preserves provider starters and retires unavailable account rows
                 async run(ctx) {
                   const auth = ctx.resolveProviderAuth(provider);
                   if (!auth.discoveryApiKey) return null;
+                  const identity = { provider, ...(auth.profileId ? { profileId: auth.profileId } : {}) };
                   const response = await fetch(${JSON.stringify(baseUrl)} + "/" + provider, {
                     headers: { Authorization: "Bearer " + auth.discoveryApiKey },
                   });
-                  if (!response.ok) return { providers: {}, outcomes: [{ provider, status: "unavailable" }] };
+                  if (!response.ok) return { providers: {}, outcomes: [{ ...identity, status: "unavailable" }] };
                   const rows = await response.json();
                   return { provider: {
                     baseUrl: ${JSON.stringify(baseUrl)}, api: "openai-completions",
@@ -105,7 +106,7 @@ it("models.list preserves provider starters and retires unavailable account rows
                       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
                       contextWindow: 32768, maxTokens: 4096,
                     })),
-                  } };
+                  }, outcomes: [{ ...identity, status: "ready" }] };
                 },
               },
             });
