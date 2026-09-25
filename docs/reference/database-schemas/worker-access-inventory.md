@@ -579,7 +579,7 @@ Counts use `Q/F/S/A/R` in that order. Source locations are available in `--json`
 | **src/channels** · `src/channels/message/ingress-queue.worker.ts`                                    |         0/0/1/0/0 |         33 | Worker implementation; keep SQL in this owner |
 | **src/config/sessions** · `src/config/sessions/provider-review-store.worker.ts`                      |         0/0/0/1/0 |         18 | Worker implementation; keep SQL in this owner |
 | **src/config/sessions** · `src/config/sessions/session-accessor.sqlite-archive.worker.ts`            |         1/0/0/0/0 |        390 | Worker implementation; keep SQL in this owner |
-| **src/config/sessions** · `src/config/sessions/session-accessor.sqlite-mutation-worker.runtime.ts`   |         0/0/0/1/0 |        325 | Worker implementation; keep SQL in this owner |
+| **src/config/sessions** · `src/config/sessions/session-accessor.sqlite-mutation-worker.runtime.ts`   |         0/0/0/1/0 |        323 | Worker implementation; keep SQL in this owner |
 | **src/config/sessions** · `src/config/sessions/session-accessor.sqlite-transcript-reports.worker.ts` |         0/0/0/1/0 |        137 | Worker implementation; keep SQL in this owner |
 | **src/config/sessions** · `src/config/sessions/session-entry-read.worker.ts`                         |         1/0/0/0/2 |         46 | Worker implementation; keep SQL in this owner |
 | **src/config/sessions** · `src/config/sessions/session-history-archive-pruning.worker.ts`            |         3/0/0/2/1 |         31 | Worker implementation; keep SQL in this owner |
